@@ -14,7 +14,7 @@ COLOR_RING = "#bcdad0"
 
 NOMBRE_APP = "Nut-Milfa"
 TAGLINE = "NUTRICIÓN DEPORTIVA"
-NUTRICIONISTAS = "Lic. María Sol Mileo  ·  Lic. Lucila Fassano"
+NUTRICIONISTAS = "Lic. Sol Mileo MP: 4743  |  Lic. Lucila Fassano MP: 4770"
 
 _LOGO_SVG = """<svg width="{size}" height="{size}" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
   <circle cx="30" cy="30" r="29" fill="none" stroke="{ring}" stroke-width="1.5"/>
@@ -55,6 +55,22 @@ def render_header(compact: bool = False) -> None:
                 {NUTRICIONISTAS}
             </div>
         </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_metric_badge(nombre: str, valor_texto: str, etiqueta: str, color: str) -> None:
+    """Tarjeta compacta: nombre de la métrica + valor + etiqueta de semáforo coloreada."""
+    html = f"""
+    <div style="display:flex;justify-content:space-between;align-items:center;
+                background:{color}1a;border-left:4px solid {color};
+                padding:9px 12px;border-radius:6px;margin-bottom:8px;">
+        <span style="font-size:0.82rem;color:{COLOR_TEXT_MUTED};">{nombre}</span>
+        <span style="font-size:0.9rem;font-weight:700;color:{COLOR_PRIMARY_DARK};">
+            {valor_texto}
+            <span style="font-weight:700;color:{color};margin-left:6px;">{etiqueta}</span>
+        </span>
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)

@@ -60,11 +60,11 @@ def pagina_dashboard():
         "fecha_medicion": "Fecha de medición",
         "nombre": "Nombre", "apellido": "Apellido", "nombre_grupo": "Grupo",
         "peso": "Peso (kg)", "imc": "IMC",
-        "porcentaje_grasa": "% Grasa", "porcentaje_musculo": "% Músculo",
+        "bio_grasa_corporal": "% Grasa corporal", "pct_musculo_esqueletico": "% Músculo esquelético",
         "cargado_por": "Cargado por",
     })
     cols = ["Fecha y hora de carga", "Fecha de medición", "Nombre", "Apellido", "Grupo",
-            "Peso (kg)", "IMC", "% Grasa", "% Músculo", "Cargado por"]
+            "Peso (kg)", "IMC", "% Grasa corporal", "% Músculo esquelético", "Cargado por"]
     st.dataframe(df_show[cols], use_container_width=True, hide_index=True)
 
 
@@ -150,12 +150,15 @@ def pagina_cargar_medicion():
             apellido = c2.text_input("Apellido *")
             c3, c4, c5 = st.columns(3)
             sexo = c3.selectbox("Sexo *", ["Masculino", "Femenino"])
-            edad = c4.number_input("Edad", min_value=0, max_value=120, value=20)
+            fecha_nacimiento = c4.date_input(
+                "Fecha de nacimiento *", value=date(1995, 1, 1),
+                min_value=date(1930, 1, 1), max_value=date.today(),
+            )
             email = c5.text_input("Email")
             grupo_nombre = st.selectbox("Grupo *", list(grupos_dict.keys()))
             if st.button("Registrar atleta"):
                 if nombre.strip() and apellido.strip():
-                    nuevo_id = db.crear_atleta(grupos_dict[grupo_nombre], nombre, apellido, sexo, edad, email)
+                    nuevo_id = db.crear_atleta(grupos_dict[grupo_nombre], nombre, apellido, sexo, fecha_nacimiento, email)
                     st.session_state["nuevo_atleta_id"] = nuevo_id
                     st.success(f"Atleta {nombre} {apellido} registrado. Ahora cargá su medición abajo.")
                 else:
@@ -168,55 +171,71 @@ def pagina_cargar_medicion():
 
     st.divider()
     st.subheader(f"2. Medición de {atleta['nombre']} {atleta['apellido']}")
+    st.caption(f"Sexo: {atleta['sexo']} · Edad: {atleta['edad']} años · Grupo: {atleta['nombre_grupo']}")
 
     fecha_medicion = st.date_input("Fecha de la medición", value=date.today())
 
-    st.markdown("**Datos básicos**")
+    st.markdown("**Datos principales**")
     c1, c2, c3 = st.columns(3)
     peso = c1.number_input("Peso (kg)", min_value=0.0, step=0.1, format="%.1f")
-    altura = c2.number_input("Altura (cm)", min_value=0.0, step=0.1, format="%.1f")
-    talla_sentado = c3.number_input("Talla sentado (cm)", min_value=0.0, step=0.1, format="%.1f")
+    talla_m = c2.number_input("Talla (m)", min_value=0.0, step=0.01, format="%.2f")
+    altura = round(talla_m * 100, 1)  # cm, usado internamente en todos los cálculos
+    c3.metric("IMC (kg/m²)", som.calcular_imc(peso, altura) or "-")
 
-    st.caption("Datos de balanza de bioimpedancia (opcional)")
-    b1, b2, b3 = st.columns(3)
-    bio_grasa_corporal = b1.number_input("% Grasa corporal (bioimpedancia)", min_value=0.0, step=0.1, format="%.1f")
-    bio_agua_corporal = b2.number_input("% Agua corporal", min_value=0.0, step=0.1, format="%.1f")
-    bio_masa_muscular = b3.number_input("Masa muscular (kg)", min_value=0.0, step=0.1, format="%.1f")
-    b4, b5, b6 = st.columns(3)
-    bio_masa_osea = b4.number_input("Masa ósea (kg)", min_value=0.0, step=0.1, format="%.1f")
-    bio_grasa_visceral = b5.number_input("Grasa visceral (nivel)", min_value=0.0, step=1.0, format="%.0f")
-    bio_metabolismo_basal = b6.number_input("Metabolismo basal (kcal)", min_value=0.0, step=1.0, format="%.0f")
-    bio_edad_metabolica = st.number_input("Edad metabólica (años)", min_value=0.0, step=1.0, format="%.0f")
-
-    st.markdown("**Perímetros (cm)**")
     c1, c2, c3 = st.columns(3)
-    brazo_relajado = c1.number_input("Brazo relajado", min_value=0.0, step=0.1, format="%.1f")
-    brazo_contraido = c2.number_input("Brazo contraído", min_value=0.0, step=0.1, format="%.1f")
-    cintura = c3.number_input("Cintura", min_value=0.0, step=0.1, format="%.1f")
-    c4, c5, c6 = st.columns(3)
-    cadera = c4.number_input("Cadera", min_value=0.0, step=0.1, format="%.1f")
-    perimetro_muslo = c5.number_input("Muslo medio (perímetro)", min_value=0.0, step=0.1, format="%.1f")
-    perimetro_pantorrilla = c6.number_input("Pantorrilla (perímetro)", min_value=0.0, step=0.1, format="%.1f")
+    pct_musculo_esqueletico = c1.number_input("% Músculo esquelético estimado", min_value=0.0, step=0.1, format="%.1f")
+    bio_grasa_corporal = c2.number_input("% Grasa corporal estimado", min_value=0.0, step=0.1, format="%.1f")
+    bio_grasa_visceral = c3.number_input("% Grasa visceral estimada", min_value=0.0, step=0.1, format="%.1f")
 
-    with st.expander("Pliegues cutáneos (mm)", expanded=True):
+    c1, c2, c3 = st.columns(3)
+    cintura = c1.number_input("Circ. cintura (cm)", min_value=0.0, step=0.1, format="%.1f")
+    cadera = c2.number_input("Circ. cadera (cm)", min_value=0.0, step=0.1, format="%.1f")
+    pliegue_abdominal = c3.number_input("Pliegue abdominal (mm)", min_value=0.0, step=0.1, format="%.1f")
+
+    observaciones = st.text_area("Observación")
+
+    with st.expander("📐 Mediciones avanzadas (ISAK) — opcional, para somatotipo e informe completo"):
+        st.caption("Se completan solo si se quiere el detalle ISAK completo (somatotipo, % músculo/grasa por pliegues, etc). Si se dejan en blanco, esas secciones no aparecen en el informe individual.")
+
+        st.markdown("**Datos adicionales**")
+        c1, c2 = st.columns(2)
+        talla_sentado = c1.number_input("Talla sentado (cm)", min_value=0.0, step=0.1, format="%.1f")
+
+        st.markdown("**Perímetros (cm)**")
+        c1, c2, c3 = st.columns(3)
+        brazo_relajado = c1.number_input("Brazo relajado", min_value=0.0, step=0.1, format="%.1f")
+        brazo_contraido = c2.number_input("Brazo contraído", min_value=0.0, step=0.1, format="%.1f")
+        perimetro_muslo = c3.number_input("Muslo medio (perímetro)", min_value=0.0, step=0.1, format="%.1f")
+        perimetro_pantorrilla = st.number_input("Pantorrilla (perímetro)", min_value=0.0, step=0.1, format="%.1f")
+
+        st.markdown("**Pliegues cutáneos ISAK (mm)**")
+        st.caption("El pliegue abdominal ya se cargó arriba, se reutiliza acá para la sumatoria de 6 pliegues.")
         c1, c2, c3 = st.columns(3)
         pliegue_tricipital = c1.number_input("Tricipital", min_value=0.0, step=0.1, format="%.1f")
         pliegue_subescapular = c2.number_input("Subescapular", min_value=0.0, step=0.1, format="%.1f")
         pliegue_suprailiaco = c3.number_input("Suprailíaco", min_value=0.0, step=0.1, format="%.1f")
-        c4, c5, c6 = st.columns(3)
-        pliegue_abdominal = c4.number_input("Abdominal", min_value=0.0, step=0.1, format="%.1f")
-        pliegue_muslo = c5.number_input("Muslo medio (pliegue)", min_value=0.0, step=0.1, format="%.1f")
-        pliegue_pantorrilla = c6.number_input("Pantorrilla (pliegue)", min_value=0.0, step=0.1, format="%.1f")
+        c4, c5 = st.columns(2)
+        pliegue_muslo = c4.number_input("Muslo medio (pliegue)", min_value=0.0, step=0.1, format="%.1f")
+        pliegue_pantorrilla = c5.number_input("Pantorrilla (pliegue)", min_value=0.0, step=0.1, format="%.1f")
 
-    with st.expander("Diámetros óseos (cm) — necesarios para la mesomorfia de Heath-Carter"):
+        st.markdown("**Diámetros óseos (cm)** — necesarios para la mesomorfia de Heath-Carter")
         c1, c2 = st.columns(2)
         diam_humero = c1.number_input("Diámetro biepicondilar húmero", min_value=0.0, step=0.1, format="%.1f")
         diam_femur = c2.number_input("Diámetro biepicondilar fémur", min_value=0.0, step=0.1, format="%.1f")
 
-    observaciones = st.text_area("Observaciones / Valoración clínica")
+        st.markdown("**Bioimpedancia adicional**")
+        c1, c2, c3 = st.columns(3)
+        bio_agua_corporal = c1.number_input("% Agua corporal", min_value=0.0, step=0.1, format="%.1f")
+        bio_masa_muscular = c2.number_input("Masa muscular (kg)", min_value=0.0, step=0.1, format="%.1f")
+        bio_masa_osea = c3.number_input("Masa ósea (kg)", min_value=0.0, step=0.1, format="%.1f")
+        c4, c5 = st.columns(2)
+        bio_metabolismo_basal = c4.number_input("Metabolismo basal (kcal)", min_value=0.0, step=1.0, format="%.0f")
+        bio_edad_metabolica = c5.number_input("Edad metabólica (años)", min_value=0.0, step=1.0, format="%.0f")
 
     # --- Cálculo en tiempo real ---
     imc = som.calcular_imc(peso, altura)
+    indice_cc = som.calcular_indice_cintura_cadera(cintura, cadera)
+    indice_ct = som.calcular_indice_cintura_talla(cintura, altura)
     sumatoria_6 = som.calcular_sumatoria_6_pliegues(
         pliegue_tricipital, pliegue_subescapular, pliegue_suprailiaco,
         pliegue_abdominal, pliegue_muslo, pliegue_pantorrilla,
@@ -232,17 +251,38 @@ def pagina_cargar_medicion():
     )
 
     st.divider()
-    st.subheader("3. Resultados calculados en tiempo real")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("IMC", imc)
-    m2.metric("Σ 6 pliegues (mm)", sumatoria_6)
-    m3.metric("% Grasa", pct_grasa)
-    m4.metric("% Músculo", pct_musculo)
-    m5, m6, m7, m8 = st.columns(4)
-    m5.metric("Endomorfia", somatotipo["endomorfia"])
-    m6.metric("Mesomorfia", somatotipo["mesomorfia"])
-    m7.metric("Ectomorfia", somatotipo["ectomorfia"])
-    m8.metric("Coordenadas", f"({somatotipo['coord_x']}, {somatotipo['coord_y']})")
+    st.subheader("3. Resultados con referencia (semáforo)")
+    sexo = atleta["sexo"]
+    m1, m2 = st.columns(2)
+    with m1:
+        et, co = som.clasificar_metrica("imc", imc, sexo)
+        branding.render_metric_badge("IMC (kg/m²)", imc or "-", et, co)
+        et, co = som.clasificar_metrica("grasa_corporal_pct", bio_grasa_corporal, sexo)
+        branding.render_metric_badge("% Grasa corporal estimado", bio_grasa_corporal or "-", et, co)
+        et, co = som.clasificar_metrica("grasa_visceral", bio_grasa_visceral, sexo)
+        branding.render_metric_badge("% Grasa visceral estimada", bio_grasa_visceral or "-", et, co)
+        et, co = som.clasificar_metrica("musculo_esqueletico_pct", pct_musculo_esqueletico, sexo)
+        branding.render_metric_badge("% Músculo esquelético estimado", pct_musculo_esqueletico or "-", et, co)
+    with m2:
+        et, co = som.clasificar_metrica("pliegue_abdominal", pliegue_abdominal, sexo)
+        branding.render_metric_badge("Pliegue abdominal (mm)", pliegue_abdominal or "-", et, co)
+        et, co = som.clasificar_metrica("circ_cintura", cintura, sexo)
+        branding.render_metric_badge("Circ. cintura (cm)", cintura or "-", et, co)
+        et, co = som.clasificar_metrica("indice_cintura_cadera", indice_cc, sexo)
+        branding.render_metric_badge("Índice cintura/cadera", indice_cc or "-", et, co)
+        et, co = som.clasificar_metrica("indice_cintura_talla", indice_ct, sexo)
+        branding.render_metric_badge("Índice cintura/talla", indice_ct or "-", et, co)
+
+    if sexo == "Femenino":
+        st.caption("⚠️ Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético solo tienen referencia cargada para hombres — se muestran sin clasificar para mujeres hasta contar con esos valores.")
+
+    if any([pliegue_tricipital, pliegue_subescapular, pliegue_suprailiaco, pliegue_muslo, pliegue_pantorrilla]):
+        st.subheader("Resultados ISAK avanzados")
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("Σ 6 pliegues (mm)", sumatoria_6)
+        a2.metric("% Grasa (Yuhasz)", pct_grasa)
+        a3.metric("% Músculo (Martin)", pct_musculo)
+        a4.metric("Somatotipo", f"{somatotipo['endomorfia']}-{somatotipo['mesomorfia']}-{somatotipo['ectomorfia']}")
 
     if st.button("💾 Guardar medición", type="primary", use_container_width=True):
         data = dict(
@@ -250,22 +290,26 @@ def pagina_cargar_medicion():
             fecha_hora_carga=datetime.now(),
             fecha_medicion=fecha_medicion,
             cargado_por=st.session_state.get("auth_user"),
-            peso=peso, altura=altura, talla_sentado=talla_sentado,
-            brazo_relajado=brazo_relajado, brazo_contraido=brazo_contraido,
-            cintura=cintura, cadera=cadera,
-            perimetro_muslo_medio=perimetro_muslo, perimetro_pantorrilla=perimetro_pantorrilla,
-            pliegue_tricipital=pliegue_tricipital, pliegue_subescapular=pliegue_subescapular,
-            pliegue_suprailiaco=pliegue_suprailiaco, pliegue_abdominal=pliegue_abdominal,
-            pliegue_muslo_medio=pliegue_muslo, pliegue_pantorrilla=pliegue_pantorrilla,
+            peso=peso or None, altura=altura or None, talla_sentado=talla_sentado or None,
+            brazo_relajado=brazo_relajado or None, brazo_contraido=brazo_contraido or None,
+            cintura=cintura or None, cadera=cadera or None,
+            perimetro_muslo_medio=perimetro_muslo or None, perimetro_pantorrilla=perimetro_pantorrilla or None,
+            pliegue_tricipital=pliegue_tricipital or None, pliegue_subescapular=pliegue_subescapular or None,
+            pliegue_suprailiaco=pliegue_suprailiaco or None, pliegue_abdominal=pliegue_abdominal or None,
+            pliegue_muslo_medio=pliegue_muslo or None, pliegue_pantorrilla=pliegue_pantorrilla or None,
             diam_humero=diam_humero or None, diam_femur=diam_femur or None,
             bio_grasa_corporal=bio_grasa_corporal or None, bio_agua_corporal=bio_agua_corporal or None,
             bio_masa_muscular=bio_masa_muscular or None, bio_masa_osea=bio_masa_osea or None,
             bio_grasa_visceral=bio_grasa_visceral or None, bio_metabolismo_basal=bio_metabolismo_basal or None,
             bio_edad_metabolica=bio_edad_metabolica or None,
-            imc=imc, porcentaje_grasa=pct_grasa, porcentaje_musculo=pct_musculo,
-            sumatoria_6_pliegues=sumatoria_6,
-            endomorfia=somatotipo["endomorfia"], mesomorfia=somatotipo["mesomorfia"],
-            ectomorfia=somatotipo["ectomorfia"], coord_x=somatotipo["coord_x"], coord_y=somatotipo["coord_y"],
+            pct_musculo_esqueletico=pct_musculo_esqueletico or None,
+            indice_cintura_cadera=indice_cc or None, indice_cintura_talla=indice_ct or None,
+            imc=imc or None,
+            porcentaje_grasa=pct_grasa or None, porcentaje_musculo=pct_musculo or None,
+            sumatoria_6_pliegues=sumatoria_6 or None,
+            endomorfia=somatotipo["endomorfia"] or None, mesomorfia=somatotipo["mesomorfia"] or None,
+            ectomorfia=somatotipo["ectomorfia"] or None,
+            coord_x=somatotipo["coord_x"] or None, coord_y=somatotipo["coord_y"] or None,
             observaciones=observaciones,
         )
         db.crear_medicion(data)
@@ -309,8 +353,9 @@ def pagina_perfil_atleta():
         return
 
     st.subheader("Historial de mediciones")
-    cols_show = ["fecha_medicion", "fecha_hora_carga", "peso", "imc", "porcentaje_grasa",
-                 "porcentaje_musculo", "sumatoria_6_pliegues", "endomorfia", "mesomorfia", "ectomorfia"]
+    cols_show = ["fecha_medicion", "fecha_hora_carga", "peso", "imc", "bio_grasa_corporal",
+                 "pct_musculo_esqueletico", "bio_grasa_visceral", "cintura", "cadera",
+                 "indice_cintura_cadera", "indice_cintura_talla", "pliegue_abdominal"]
     st.dataframe(df_hist[cols_show], use_container_width=True, hide_index=True)
 
     tab1, tab2 = st.tabs(["📈 Evolución temporal", "🔺 Somatocarta"])
@@ -319,8 +364,8 @@ def pagina_perfil_atleta():
         import plotly.graph_objects as go
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df_hist["fecha_medicion"], y=df_hist["peso"], mode="lines+markers", name="Peso (kg)"))
-        fig.add_trace(go.Scatter(x=df_hist["fecha_medicion"], y=df_hist["porcentaje_musculo"], mode="lines+markers", name="% Músculo", yaxis="y2"))
-        fig.add_trace(go.Scatter(x=df_hist["fecha_medicion"], y=df_hist["porcentaje_grasa"], mode="lines+markers", name="% Grasa", yaxis="y2"))
+        fig.add_trace(go.Scatter(x=df_hist["fecha_medicion"], y=df_hist["pct_musculo_esqueletico"], mode="lines+markers", name="% Músculo esquelético", yaxis="y2"))
+        fig.add_trace(go.Scatter(x=df_hist["fecha_medicion"], y=df_hist["bio_grasa_corporal"], mode="lines+markers", name="% Grasa corporal", yaxis="y2"))
         fig.update_layout(
             xaxis_title="Fecha de medición", yaxis=dict(title="Peso (kg)"),
             yaxis2=dict(title="%", overlaying="y", side="right"),
@@ -360,7 +405,9 @@ def pagina_exportar():
                 st.warning("Este atleta no tiene mediciones cargadas.")
             else:
                 st.caption(f"Se generará la ficha con la última medición: {medicion['fecha_medicion']}")
-                pdf_bytes = pdfgen.generar_pdf_ficha_individual(atleta, medicion)
+                df_hist_atleta = db.listar_mediciones_atleta(atleta["id"])
+                medicion_anterior = df_hist_atleta.iloc[-2].to_dict() if len(df_hist_atleta) >= 2 else None
+                pdf_bytes = pdfgen.generar_pdf_ficha_individual(atleta, medicion, medicion_anterior)
                 st.download_button(
                     "⬇️ Descargar Ficha PDF", data=pdf_bytes,
                     file_name=f"ficha_{atleta['apellido']}_{atleta['nombre']}.pdf",
@@ -410,24 +457,33 @@ def pagina_exportar():
             if not stats or not stats.get("cantidad_atletas"):
                 st.info("Este grupo todavía no tiene mediciones cargadas.")
             else:
+                def _r(v):
+                    return round(v, 2) if v is not None and pd.notna(v) else "-"
+
                 st.subheader(f"Promedios del grupo: {grupo_nombre}")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Atletas con medición", int(stats["cantidad_atletas"]))
-                c2.metric("IMC promedio", round(stats["imc_prom"], 2))
-                c3.metric("% Grasa promedio", round(stats["grasa_prom"], 2))
-                c4.metric("% Músculo promedio", round(stats["musculo_prom"], 2))
+                c2.metric("IMC promedio", _r(stats["imc_prom"]))
+                c3.metric("% Grasa corporal promedio", _r(stats["grasa_prom"]))
+                c4.metric("% Músculo esquelético promedio", _r(stats["musculo_prom"]))
                 c5, c6, c7 = st.columns(3)
-                c5.metric("Endomorfia grupal", round(stats["endomorfia_prom"], 2))
-                c6.metric("Mesomorfia grupal", round(stats["mesomorfia_prom"], 2))
-                c7.metric("Ectomorfia grupal", round(stats["ectomorfia_prom"], 2))
+                c5.metric("% Grasa visceral promedio", _r(stats["grasa_visceral_prom"]))
+                c6.metric("Índice cintura/cadera promedio", _r(stats["icc_prom"]))
+                c7.metric("Índice cintura/talla promedio", _r(stats["ict_prom"]))
 
-                puntos = [{
-                    "x": stats["x_prom"], "y": stats["y_prom"], "fecha": "Promedio grupal",
-                    "endomorfia": round(stats["endomorfia_prom"], 2),
-                    "mesomorfia": round(stats["mesomorfia_prom"], 2),
-                    "ectomorfia": round(stats["ectomorfia_prom"], 2),
-                }]
-                st.plotly_chart(som.crear_grafico_somatocarta(puntos, titulo=f"Somatotipo grupal - {grupo_nombre}"), use_container_width=True)
+                if pd.notna(stats.get("endomorfia_prom")):
+                    st.caption("Promedios ISAK (solo atletas con somatotipo cargado)")
+                    d1, d2, d3 = st.columns(3)
+                    d1.metric("Endomorfia grupal", _r(stats["endomorfia_prom"]))
+                    d2.metric("Mesomorfia grupal", _r(stats["mesomorfia_prom"]))
+                    d3.metric("Ectomorfia grupal", _r(stats["ectomorfia_prom"]))
+                    puntos = [{
+                        "x": stats["x_prom"], "y": stats["y_prom"], "fecha": "Promedio grupal",
+                        "endomorfia": _r(stats["endomorfia_prom"]),
+                        "mesomorfia": _r(stats["mesomorfia_prom"]),
+                        "ectomorfia": _r(stats["ectomorfia_prom"]),
+                    }]
+                    st.plotly_chart(som.crear_grafico_somatocarta(puntos, titulo=f"Somatotipo grupal - {grupo_nombre}"), use_container_width=True)
 
                 st.subheader("Detalle por atleta (última medición)")
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)

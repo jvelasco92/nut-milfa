@@ -68,6 +68,8 @@ def generar_medicion_realista(sexo: str, fecha_medicion: date, factor_progreso: 
     perimetro_pantorrilla = _rango(37 if sexo == "Masculino" else 35, 2.5)
 
     imc = som.calcular_imc(peso, altura)
+    indice_cc = som.calcular_indice_cintura_cadera(cintura, cadera)
+    indice_ct = som.calcular_indice_cintura_talla(cintura, altura)
     sumatoria_6 = som.calcular_sumatoria_6_pliegues(
         pliegue_tricipital, pliegue_subescapular, pliegue_suprailiaco,
         pliegue_abdominal, pliegue_muslo, pliegue_pantorrilla,
@@ -92,6 +94,7 @@ def generar_medicion_realista(sexo: str, fecha_medicion: date, factor_progreso: 
         pliegue_suprailiaco=round(pliegue_suprailiaco, 1), pliegue_abdominal=round(pliegue_abdominal, 1),
         pliegue_muslo_medio=round(pliegue_muslo, 1), pliegue_pantorrilla=round(pliegue_pantorrilla, 1),
         diam_humero=diam_humero, diam_femur=diam_femur,
+        pct_musculo_esqueletico=round(pct_musculo - random.uniform(2, 5), 1),
         bio_grasa_corporal=round(pct_grasa + random.uniform(-1, 1), 1),
         bio_agua_corporal=round(58 + random.uniform(-3, 3), 1),
         bio_masa_muscular=round(peso * (pct_musculo / 100) + random.uniform(-1, 1), 1),
@@ -99,6 +102,7 @@ def generar_medicion_realista(sexo: str, fecha_medicion: date, factor_progreso: 
         bio_grasa_visceral=float(random.randint(3, 9)),
         bio_metabolismo_basal=float(round(1600 if sexo == "Masculino" else 1350 + random.uniform(-80, 80))),
         bio_edad_metabolica=float(random.randint(20, 35)),
+        indice_cintura_cadera=indice_cc, indice_cintura_talla=indice_ct,
         imc=imc, porcentaje_grasa=pct_grasa, porcentaje_musculo=pct_musculo,
         sumatoria_6_pliegues=sumatoria_6,
         endomorfia=somatotipo["endomorfia"], mesomorfia=somatotipo["mesomorfia"],
@@ -117,11 +121,20 @@ def main():
     else:
         grupo_id = grupos[NOMBRE_GRUPO]
 
+    # Limpieza: borra atletas de prueba cargados por corridas anteriores del script
+    # (Grupo Prueba es exclusivamente un sandbox, no tiene datos reales).
+    existentes = db.listar_atletas(grupo_id=grupo_id)
+    nombres_ejemplo = {(n, a) for n, a, _, _ in ATLETAS_EJEMPLO}
+    for _, fila in existentes.iterrows():
+        if (fila["nombre"], fila["apellido"]) in nombres_ejemplo:
+            db.eliminar_atleta(fila["id"])
+
     hoy = date.today()
     fechas = [hoy - timedelta(days=90), hoy - timedelta(days=45), hoy]
 
     for nombre, apellido, sexo, edad in ATLETAS_EJEMPLO:
-        atleta_id = db.crear_atleta(grupo_id, nombre, apellido, sexo, edad, email="")
+        fecha_nacimiento = date(hoy.year - edad, 6, 15)
+        atleta_id = db.crear_atleta(grupo_id, nombre, apellido, sexo, fecha_nacimiento, email="")
         print(f"Atleta creado: {nombre} {apellido} (id={atleta_id})")
 
         for i, fecha in enumerate(fechas):

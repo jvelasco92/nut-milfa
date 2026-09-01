@@ -9,6 +9,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -24,6 +27,7 @@ from reportlab.platypus import (
 )
 
 import branding
+import utils_somatotype as som
 
 PRIMARY_COLOR = colors.HexColor(branding.COLOR_PRIMARY)
 PRIMARY_DARK = colors.HexColor(branding.COLOR_PRIMARY_DARK)
@@ -164,14 +168,50 @@ def _fmt(v, suf=""):
     return f"{v}{suf}"
 
 
+def _tabla_semaforo(filas: list[tuple[str, str, str, str]], col_widths=(6.5 * cm, 3 * cm, 3.5 * cm)) -> Table:
+    """filas: (nombre_metrica, valor_texto, etiqueta_clasificación, color_hex)."""
+    data = [["Métrica", "Valor", "Referencia"]] + [[n, v, et] for n, v, et, _ in filas]
+    t = Table(data, colWidths=list(col_widths))
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]
+    for i, (_, _, _, color_hex) in enumerate(filas, start=1):
+        bg = colors.HexColor(color_hex)
+        texto = colors.black if color_hex.upper() == som.COLOR_AMARILLO.upper() else colors.white
+        style += [
+            ("BACKGROUND", (2, i), (2, i), bg),
+            ("TEXTCOLOR", (2, i), (2, i), texto),
+            ("FONTNAME", (2, i), (2, i), "Helvetica-Bold"),
+        ]
+    t.setStyle(TableStyle(style))
+    return t
+
+
 # ---------------------------------------------------------------------------
 # PDF: Ficha individual
 # ---------------------------------------------------------------------------
-def generar_pdf_ficha_individual(atleta: dict, medicion: dict) -> bytes:
+def _delta_texto(actual, anterior, suf=""):
+    if actual is None or anterior is None or pd.isna(actual) or pd.isna(anterior):
+        return "-"
+    diff = round(actual - anterior, 2)
+    signo = "+" if diff >= 0 else ""
+    return f"{signo}{diff}{suf}"
+
+
+def generar_pdf_ficha_individual(atleta: dict, medicion: dict, medicion_anterior: dict = None) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2.6 * cm, bottomMargin=1.5 * cm)
     styles = _base_styles()
     story = []
+    sexo = atleta.get("sexo", "Masculino")
 
     story.append(Paragraph("Ficha Antropométrica Individual", styles["TituloApp"]))
     story.append(
@@ -181,74 +221,131 @@ def generar_pdf_ficha_individual(atleta: dict, medicion: dict) -> bytes:
         )
     )
 
+    edad_al_momento = atleta.get("edad")
+    if atleta.get("fecha_nacimiento") and medicion.get("fecha_medicion"):
+        edad_al_momento = som.calcular_edad(atleta["fecha_nacimiento"], medicion["fecha_medicion"])
+
     story.append(_tabla_datos([
-        ("Sexo", _fmt(atleta.get("sexo"))),
-        ("Edad", _fmt(atleta.get("edad"), " años")),
+        ("Sexo", _fmt(sexo)),
+        ("Fecha de nacimiento", _fmt(atleta.get("fecha_nacimiento"))),
+        ("Edad al momento de la medición", _fmt(edad_al_momento, " años")),
         ("Email", _fmt(atleta.get("email"))),
         ("Fecha de medición", _fmt(medicion.get("fecha_medicion"))),
         ("Fecha y hora de carga", _fmt(medicion.get("fecha_hora_carga"))),
         ("Cargado por", _fmt(medicion.get("cargado_por"))),
     ]))
 
-    story.append(Paragraph("Datos Básicos", styles["Seccion"]))
-    story.append(_tabla_datos([
-        ("Peso (kg)", _fmt(medicion.get("peso"))),
-        ("Altura (cm)", _fmt(medicion.get("altura"))),
-        ("Talla sentado (cm)", _fmt(medicion.get("talla_sentado"))),
-        ("IMC", _fmt(medicion.get("imc"))),
-    ]))
-
-    story.append(Paragraph("Perímetros (cm)", styles["Seccion"]))
-    story.append(_tabla_datos([
-        ("Brazo relajado", _fmt(medicion.get("brazo_relajado"))),
-        ("Brazo contraído", _fmt(medicion.get("brazo_contraido"))),
-        ("Cintura", _fmt(medicion.get("cintura"))),
-        ("Cadera", _fmt(medicion.get("cadera"))),
-        ("Muslo medio", _fmt(medicion.get("perimetro_muslo_medio"))),
-        ("Pantorrilla", _fmt(medicion.get("perimetro_pantorrilla"))),
-    ]))
-
-    story.append(Paragraph("Pliegues Cutáneos (mm)", styles["Seccion"]))
-    story.append(_tabla_datos([
-        ("Tricipital", _fmt(medicion.get("pliegue_tricipital"))),
-        ("Subescapular", _fmt(medicion.get("pliegue_subescapular"))),
-        ("Suprailíaco", _fmt(medicion.get("pliegue_suprailiaco"))),
-        ("Abdominal", _fmt(medicion.get("pliegue_abdominal"))),
-        ("Muslo medio", _fmt(medicion.get("pliegue_muslo_medio"))),
-        ("Pantorrilla", _fmt(medicion.get("pliegue_pantorrilla"))),
-        ("Sumatoria 6 pliegues", _fmt(medicion.get("sumatoria_6_pliegues"), " mm")),
-    ]))
-
-    story.append(Paragraph("Composición Corporal y Somatotipo", styles["Seccion"]))
-    story.append(_tabla_datos([
-        ("% Grasa (Yuhasz)", _fmt(medicion.get("porcentaje_grasa"), " %")),
-        ("% Músculo (Martin)", _fmt(medicion.get("porcentaje_musculo"), " %")),
-        ("Endomorfia", _fmt(medicion.get("endomorfia"))),
-        ("Mesomorfia", _fmt(medicion.get("mesomorfia"))),
-        ("Ectomorfia", _fmt(medicion.get("ectomorfia"))),
-        ("Coordenadas (X, Y)", f"({_fmt(medicion.get('coord_x'))}, {_fmt(medicion.get('coord_y'))})"),
-    ]))
-
-    datos_bio = [
-        ("% Grasa corporal", _fmt(medicion.get("bio_grasa_corporal"), " %")),
-        ("% Agua corporal", _fmt(medicion.get("bio_agua_corporal"), " %")),
-        ("Masa muscular", _fmt(medicion.get("bio_masa_muscular"), " kg")),
-        ("Masa ósea", _fmt(medicion.get("bio_masa_osea"), " kg")),
-        ("Grasa visceral (nivel)", _fmt(medicion.get("bio_grasa_visceral"))),
-        ("Metabolismo basal", _fmt(medicion.get("bio_metabolismo_basal"), " kcal")),
-        ("Edad metabólica", _fmt(medicion.get("bio_edad_metabolica"), " años")),
+    # --- Datos principales con semáforo de referencia (siempre se muestran) ---
+    story.append(Paragraph("Datos Principales", styles["Seccion"]))
+    metricas_core = [
+        ("Peso (kg)", medicion.get("peso"), None, "peso"),
+        ("Talla (m)", (medicion.get("altura") / 100) if medicion.get("altura") else None, None, "talla"),
+        ("IMC (kg/m²)", medicion.get("imc"), "imc", "imc"),
+        ("% Músculo esquelético estimado", medicion.get("pct_musculo_esqueletico"), "musculo_esqueletico_pct", "musculo"),
+        ("% Grasa corporal estimado", medicion.get("bio_grasa_corporal"), "grasa_corporal_pct", "grasa"),
+        ("% Grasa visceral estimada", medicion.get("bio_grasa_visceral"), "grasa_visceral", "visceral"),
+        ("Circ. cintura (cm)", medicion.get("cintura"), "circ_cintura", "cm"),
+        ("Circ. cadera (cm)", medicion.get("cadera"), None, "cm"),
+        ("Pliegue abdominal (mm)", medicion.get("pliegue_abdominal"), "pliegue_abdominal", "mm"),
+        ("Índice cintura/cadera", medicion.get("indice_cintura_cadera"), "indice_cintura_cadera", ""),
+        ("Índice cintura/talla", medicion.get("indice_cintura_talla"), "indice_cintura_talla", ""),
     ]
-    if any(v != "-" for _, v in datos_bio):
-        story.append(Paragraph("Datos de Bioimpedancia", styles["Seccion"]))
-        story.append(_tabla_datos(datos_bio))
+    filas = []
+    for nombre, valor, metrica_ref, _ in metricas_core:
+        if metrica_ref:
+            etiqueta, color = som.clasificar_metrica(metrica_ref, valor, sexo)
+        else:
+            etiqueta, color = ("—", branding.COLOR_TEXT_MUTED)
+        filas.append((nombre, _fmt(round(valor, 2) if isinstance(valor, float) else valor), etiqueta, color))
+    story.append(_tabla_semaforo(filas))
 
-    x, y = medicion.get("coord_x"), medicion.get("coord_y")
-    if x is not None and y is not None:
-        img_buf = _grafico_somatocarta_png([(x, y)])
-        story.append(Spacer(1, 10))
-        story.append(Image(img_buf, width=11 * cm, height=8.8 * cm))
+    if sexo == "Femenino":
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(
+            "Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético no tienen "
+            "referencia cargada para mujeres todavía; se muestran sin clasificar.",
+            styles["Normal"],
+        ))
 
-    story.append(Paragraph("Observaciones / Valoración Clínica", styles["Seccion"]))
+    # --- Comparación con la medición anterior ---
+    if medicion_anterior:
+        story.append(Paragraph("Comparación con Medición Anterior", styles["Seccion"]))
+        story.append(Paragraph(
+            f"Anterior: {_fmt(medicion_anterior.get('fecha_medicion'))}  →  "
+            f"Actual: {_fmt(medicion.get('fecha_medicion'))}",
+            styles["Normal"],
+        ))
+        story.append(Spacer(1, 4))
+        story.append(_tabla_datos([
+            ("Δ Peso (kg)", _delta_texto(medicion.get("peso"), medicion_anterior.get("peso"))),
+            ("Δ IMC", _delta_texto(medicion.get("imc"), medicion_anterior.get("imc"))),
+            ("Δ % Músculo esquelético", _delta_texto(medicion.get("pct_musculo_esqueletico"), medicion_anterior.get("pct_musculo_esqueletico"), " %")),
+            ("Δ % Grasa corporal", _delta_texto(medicion.get("bio_grasa_corporal"), medicion_anterior.get("bio_grasa_corporal"), " %")),
+            ("Δ Circ. cintura", _delta_texto(medicion.get("cintura"), medicion_anterior.get("cintura"), " cm")),
+        ]))
+
+    # --- Secciones ISAK avanzadas: solo si están cargadas ---
+    hay_perimetros = any([
+        medicion.get("brazo_relajado"), medicion.get("brazo_contraido"),
+        medicion.get("perimetro_muslo_medio"), medicion.get("perimetro_pantorrilla"),
+    ])
+    if hay_perimetros:
+        story.append(Paragraph("Perímetros Adicionales (cm)", styles["Seccion"]))
+        story.append(_tabla_datos([
+            ("Brazo relajado", _fmt(medicion.get("brazo_relajado"))),
+            ("Brazo contraído", _fmt(medicion.get("brazo_contraido"))),
+            ("Muslo medio", _fmt(medicion.get("perimetro_muslo_medio"))),
+            ("Pantorrilla", _fmt(medicion.get("perimetro_pantorrilla"))),
+        ]))
+
+    hay_pliegues_isak = any([
+        medicion.get("pliegue_tricipital"), medicion.get("pliegue_subescapular"),
+        medicion.get("pliegue_suprailiaco"), medicion.get("pliegue_muslo_medio"),
+        medicion.get("pliegue_pantorrilla"),
+    ])
+    if hay_pliegues_isak:
+        story.append(Paragraph("Pliegues Cutáneos ISAK (mm)", styles["Seccion"]))
+        story.append(_tabla_datos([
+            ("Tricipital", _fmt(medicion.get("pliegue_tricipital"))),
+            ("Subescapular", _fmt(medicion.get("pliegue_subescapular"))),
+            ("Suprailíaco", _fmt(medicion.get("pliegue_suprailiaco"))),
+            ("Abdominal", _fmt(medicion.get("pliegue_abdominal"))),
+            ("Muslo medio", _fmt(medicion.get("pliegue_muslo_medio"))),
+            ("Pantorrilla", _fmt(medicion.get("pliegue_pantorrilla"))),
+            ("Sumatoria 6 pliegues", _fmt(medicion.get("sumatoria_6_pliegues"), " mm")),
+            ("% Grasa (Yuhasz, por pliegues)", _fmt(medicion.get("porcentaje_grasa"), " %")),
+            ("% Músculo (Martin, por perímetros)", _fmt(medicion.get("porcentaje_musculo"), " %")),
+        ]))
+
+    hay_somatotipo = any([medicion.get("endomorfia"), medicion.get("mesomorfia"), medicion.get("ectomorfia")])
+    if hay_somatotipo:
+        story.append(Paragraph("Somatotipo (Heath-Carter)", styles["Seccion"]))
+        story.append(_tabla_datos([
+            ("Endomorfia", _fmt(medicion.get("endomorfia"))),
+            ("Mesomorfia", _fmt(medicion.get("mesomorfia"))),
+            ("Ectomorfia", _fmt(medicion.get("ectomorfia"))),
+            ("Coordenadas (X, Y)", f"({_fmt(medicion.get('coord_x'))}, {_fmt(medicion.get('coord_y'))})"),
+        ]))
+        x, y = medicion.get("coord_x"), medicion.get("coord_y")
+        if x is not None and y is not None:
+            story.append(Spacer(1, 10))
+            story.append(Image(_grafico_somatocarta_png([(x, y)]), width=11 * cm, height=8.8 * cm))
+
+    hay_bio_adicional = any([
+        medicion.get("bio_agua_corporal"), medicion.get("bio_masa_muscular"),
+        medicion.get("bio_masa_osea"), medicion.get("bio_metabolismo_basal"), medicion.get("bio_edad_metabolica"),
+    ])
+    if hay_bio_adicional:
+        story.append(Paragraph("Bioimpedancia Adicional", styles["Seccion"]))
+        story.append(_tabla_datos([
+            ("% Agua corporal", _fmt(medicion.get("bio_agua_corporal"), " %")),
+            ("Masa muscular", _fmt(medicion.get("bio_masa_muscular"), " kg")),
+            ("Masa ósea", _fmt(medicion.get("bio_masa_osea"), " kg")),
+            ("Metabolismo basal", _fmt(medicion.get("bio_metabolismo_basal"), " kcal")),
+            ("Edad metabólica", _fmt(medicion.get("bio_edad_metabolica"), " años")),
+        ]))
+
+    story.append(Paragraph("Observación", styles["Seccion"]))
     obs = medicion.get("observaciones") or "Sin observaciones registradas."
     story.append(Paragraph(obs, styles["Normal"]))
 
@@ -323,10 +420,126 @@ def generar_excel_historial(atleta: dict, df_historial: pd.DataFrame) -> bytes:
     return buffer.getvalue()
 
 
+_COLUMNAS_GRUPO = [
+    ("nombre", "Nombre", None),
+    ("apellido", "Apellido", None),
+    ("fecha_medicion", "Fecha medición", None),
+    ("peso", "Peso (kg)", None),
+    ("talla_m", "Talla (m)", None),
+    ("imc", "IMC (kg/m²)", "imc"),
+    ("pct_musculo_esqueletico", "% Músculo esquelético", "musculo_esqueletico_pct"),
+    ("bio_grasa_corporal", "% Grasa corporal", "grasa_corporal_pct"),
+    ("bio_grasa_visceral", "% Grasa visceral", "grasa_visceral"),
+    ("cintura", "Circ. cintura (cm)", "circ_cintura"),
+    ("cadera", "Circ. cadera (cm)", None),
+    ("pliegue_abdominal", "Pliegue abdominal (mm)", "pliegue_abdominal"),
+    ("indice_cintura_cadera", "Índice cintura/cadera", "indice_cintura_cadera"),
+    ("indice_cintura_talla", "Índice cintura/talla", "indice_cintura_talla"),
+]
+
+
 def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas: dict) -> bytes:
+    """Tabla coloreada (semáforo) por atleta, con leyenda de referencias y promedios,
+    inspirada en la planilla de las nutricionistas."""
+    df = df_detalle.copy()
+    df["talla_m"] = df["altura"].apply(lambda v: round(v / 100, 2) if pd.notna(v) else None)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Detalle"
+
+    fill_titulo = PatternFill("solid", fgColor="1F6F78")
+    fill_header = PatternFill("solid", fgColor="FFE599")
+    font_titulo = Font(bold=True, color="FFFFFF", size=13)
+    font_header = Font(bold=True, size=10)
+
+    n_cols = len(_COLUMNAS_GRUPO)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n_cols)
+    ws.cell(row=1, column=1, value=f"CONTROL DE COMPOSICIÓN CORPORAL — {nombre_grupo}").font = font_titulo
+    ws.cell(row=1, column=1).fill = fill_titulo
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=n_cols)
+    ws.cell(row=2, column=1, value=branding.NUTRICIONISTAS).font = Font(italic=True, size=10)
+
+    header_row = 4
+    for col_idx, (_, titulo, _) in enumerate(_COLUMNAS_GRUPO, start=1):
+        c = ws.cell(row=header_row, column=col_idx, value=titulo)
+        c.font = font_header
+        c.fill = fill_header
+        c.alignment = Alignment(horizontal="center", wrap_text=True)
+
+    for row_idx, (_, fila) in enumerate(df.iterrows(), start=header_row + 1):
+        sexo = fila.get("sexo", "Masculino")
+        for col_idx, (campo, _, metrica_ref) in enumerate(_COLUMNAS_GRUPO, start=1):
+            valor = fila.get(campo)
+            valor = None if pd.isna(valor) else valor
+            cell = ws.cell(row=row_idx, column=col_idx, value=valor)
+            cell.alignment = Alignment(horizontal="center")
+            if metrica_ref:
+                _, color = som.clasificar_metrica(metrica_ref, valor, sexo)
+                if color not in (som.COLOR_SIN_DATO,):
+                    cell.fill = PatternFill("solid", fgColor=color.lstrip("#").upper())
+
+    for col_idx in range(1, n_cols + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 16
+
+    # --- Hoja de referencias (leyenda de colores y umbrales) ---
+    ws_ref = wb.create_sheet("Referencias")
+    ws_ref.cell(row=1, column=1, value="Referencias utilizadas para el semáforo de colores").font = Font(bold=True, size=12)
+    fila_actual = 3
+    etiquetas_metricas = {
+        "imc": "IMC (kg/m²)",
+        "grasa_corporal_pct": "% Grasa corporal",
+        "grasa_visceral": "% Grasa visceral",
+        "pliegue_abdominal": "Pliegue abdominal (mm)",
+        "circ_cintura": "Circ. cintura (cm) — solo hombres",
+        "indice_cintura_cadera": "Índice cintura/cadera — solo hombres",
+        "indice_cintura_talla": "Índice cintura/talla — solo hombres",
+        "musculo_esqueletico_pct": "% Músculo esquelético (18-39 años) — solo hombres",
+    }
+    for metrica, titulo in etiquetas_metricas.items():
+        ws_ref.cell(row=fila_actual, column=1, value=titulo).font = Font(bold=True)
+        fila_actual += 1
+        reglas = som.reglas_referencia(metrica)
+        for minimo, maximo, etiqueta, color in reglas:
+            if minimo is None:
+                rango = f"< {maximo}"
+            elif maximo is None:
+                rango = f"≥ {minimo}"
+            else:
+                rango = f"{minimo} - {maximo}"
+            c = ws_ref.cell(row=fila_actual, column=1, value=f"{etiqueta}: {rango}")
+            c.fill = PatternFill("solid", fgColor=color.lstrip("#").upper())
+            fila_actual += 1
+        fila_actual += 1
+    ws_ref.column_dimensions["A"].width = 45
+
+    # --- Hoja de promedios grupales ---
+    ws_prom = wb.create_sheet("Promedios")
+    etiquetas_prom = {
+        "cantidad_atletas": "Atletas con medición",
+        "peso_prom": "Peso promedio (kg)",
+        "imc_prom": "IMC promedio",
+        "grasa_prom": "% Grasa corporal promedio",
+        "musculo_prom": "% Músculo esquelético promedio",
+        "grasa_visceral_prom": "% Grasa visceral promedio",
+        "icc_prom": "Índice cintura/cadera promedio",
+        "ict_prom": "Índice cintura/talla promedio",
+        "sumatoria_prom": "Sumatoria 6 pliegues promedio (ISAK)",
+        "endomorfia_prom": "Endomorfia grupal (ISAK)",
+        "mesomorfia_prom": "Mesomorfia grupal (ISAK)",
+        "ectomorfia_prom": "Ectomorfia grupal (ISAK)",
+    }
+    ws_prom.cell(row=1, column=1, value="Métrica").font = Font(bold=True)
+    ws_prom.cell(row=1, column=2, value="Promedio").font = Font(bold=True)
+    for i, (clave, etiqueta) in enumerate(etiquetas_prom.items(), start=2):
+        valor = estadisticas.get(clave)
+        valor = round(valor, 2) if isinstance(valor, float) and pd.notna(valor) else valor
+        ws_prom.cell(row=i, column=1, value=etiqueta)
+        ws_prom.cell(row=i, column=2, value=valor)
+    ws_prom.column_dimensions["A"].width = 38
+    ws_prom.column_dimensions["B"].width = 14
+
     buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_detalle.to_excel(writer, index=False, sheet_name="Detalle")
-        pd.DataFrame([estadisticas]).to_excel(writer, index=False, sheet_name="Promedios")
+    wb.save(buffer)
     buffer.seek(0)
     return buffer.getvalue()

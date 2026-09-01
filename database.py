@@ -25,6 +25,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
+import utils_somatotype as som
+
 Base = declarative_base()
 
 
@@ -50,7 +52,8 @@ class Atleta(Base):
     nombre = Column(String(100), nullable=False)
     apellido = Column(String(100), nullable=False)
     sexo = Column(String(20), nullable=False, default="Masculino")
-    edad = Column(Integer)
+    fecha_nacimiento = Column(Date)
+    edad = Column(Integer)  # se recalcula a partir de fecha_nacimiento en cada carga
     email = Column(String(150))
     fecha_registro = Column(DateTime, default=datetime.utcnow)
 
@@ -105,9 +108,12 @@ class Medicion(Base):
 
     # Resultados calculados
     imc = Column(Float)
-    porcentaje_grasa = Column(Float)
-    porcentaje_musculo = Column(Float)
+    porcentaje_grasa = Column(Float)          # % graso calculado por pliegues (Yuhasz) - avanzado/ISAK
+    porcentaje_musculo = Column(Float)        # % muscular calculado (Martin) - avanzado/ISAK
     sumatoria_6_pliegues = Column(Float)
+    indice_cintura_cadera = Column(Float)
+    indice_cintura_talla = Column(Float)
+    pct_musculo_esqueletico = Column(Float)   # % músculo esquelético estimado por balanza (campo "core")
 
     # Somatotipo
     endomorfia = Column(Float)
@@ -130,24 +136,33 @@ def get_engine():
     return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=10)
 
 
-# Columnas agregadas después de la primera versión de la tabla `mediciones`.
+# Columnas agregadas después de la primera versión de las tablas.
 # create_all() no altera tablas ya existentes, así que se agregan a mano
 # (ADD COLUMN IF NOT EXISTS es idempotente: no rompe nada si ya existen).
-_COLUMNAS_NUEVAS_MEDICIONES = {
-    "bio_grasa_corporal": "FLOAT",
-    "bio_agua_corporal": "FLOAT",
-    "bio_masa_muscular": "FLOAT",
-    "bio_masa_osea": "FLOAT",
-    "bio_grasa_visceral": "FLOAT",
-    "bio_metabolismo_basal": "FLOAT",
-    "bio_edad_metabolica": "FLOAT",
+_COLUMNAS_NUEVAS = {
+    "mediciones": {
+        "bio_grasa_corporal": "FLOAT",
+        "bio_agua_corporal": "FLOAT",
+        "bio_masa_muscular": "FLOAT",
+        "bio_masa_osea": "FLOAT",
+        "bio_grasa_visceral": "FLOAT",
+        "bio_metabolismo_basal": "FLOAT",
+        "bio_edad_metabolica": "FLOAT",
+        "indice_cintura_cadera": "FLOAT",
+        "indice_cintura_talla": "FLOAT",
+        "pct_musculo_esqueletico": "FLOAT",
+    },
+    "atletas": {
+        "fecha_nacimiento": "DATE",
+    },
 }
 
 
 def _migrar_columnas_nuevas() -> None:
     with get_engine().begin() as conn:
-        for nombre, tipo in _COLUMNAS_NUEVAS_MEDICIONES.items():
-            conn.execute(text(f"ALTER TABLE mediciones ADD COLUMN IF NOT EXISTS {nombre} {tipo}"))
+        for tabla, columnas in _COLUMNAS_NUEVAS.items():
+            for nombre, tipo in columnas.items():
+                conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {nombre} {tipo}"))
 
 
 def init_db() -> None:
@@ -227,14 +242,15 @@ def obtener_grupos_dict() -> dict:
 # ---------------------------------------------------------------------------
 # Atletas
 # ---------------------------------------------------------------------------
-def crear_atleta(grupo_id, nombre: str, apellido: str, sexo: str, edad: int, email: str = "") -> int:
+def crear_atleta(grupo_id, nombre: str, apellido: str, sexo: str, fecha_nacimiento: date, email: str = "") -> int:
     with get_session() as s:
         a = Atleta(
             grupo_id=grupo_id,
             nombre=nombre.strip(),
             apellido=apellido.strip(),
             sexo=sexo,
-            edad=edad,
+            fecha_nacimiento=fecha_nacimiento,
+            edad=som.calcular_edad(fecha_nacimiento),
             email=(email or "").strip(),
         )
         s.add(a)
@@ -245,7 +261,7 @@ def crear_atleta(grupo_id, nombre: str, apellido: str, sexo: str, edad: int, ema
     return atleta_id
 
 
-def actualizar_atleta(atleta_id: int, grupo_id, nombre: str, apellido: str, sexo: str, edad: int, email: str) -> None:
+def actualizar_atleta(atleta_id: int, grupo_id, nombre: str, apellido: str, sexo: str, fecha_nacimiento: date, email: str) -> None:
     with get_session() as s:
         a = s.get(Atleta, atleta_id)
         if a:
@@ -253,7 +269,8 @@ def actualizar_atleta(atleta_id: int, grupo_id, nombre: str, apellido: str, sexo
             a.nombre = nombre.strip()
             a.apellido = apellido.strip()
             a.sexo = sexo
-            a.edad = edad
+            a.fecha_nacimiento = fecha_nacimiento
+            a.edad = som.calcular_edad(fecha_nacimiento)
             a.email = (email or "").strip()
     listar_atletas.clear()
     obtener_atleta.clear()
@@ -367,7 +384,7 @@ def listar_ultimas_mediciones(limite: int = 15) -> pd.DataFrame:
         text(
             """
             SELECT m.id, m.fecha_hora_carga, m.fecha_medicion, m.cargado_por,
-                   m.peso, m.imc, m.porcentaje_grasa, m.porcentaje_musculo,
+                   m.peso, m.imc, m.bio_grasa_corporal, m.pct_musculo_esqueletico,
                    a.nombre, a.apellido,
                    COALESCE(g.nombre_grupo, 'Sin grupo') AS nombre_grupo
             FROM mediciones m
@@ -419,8 +436,11 @@ def estadisticas_grupo(grupo_id: int) -> dict:
             COUNT(*) AS cantidad_atletas,
             AVG(peso) AS peso_prom,
             AVG(imc) AS imc_prom,
-            AVG(porcentaje_grasa) AS grasa_prom,
-            AVG(porcentaje_musculo) AS musculo_prom,
+            AVG(bio_grasa_corporal) AS grasa_prom,
+            AVG(pct_musculo_esqueletico) AS musculo_prom,
+            AVG(bio_grasa_visceral) AS grasa_visceral_prom,
+            AVG(indice_cintura_cadera) AS icc_prom,
+            AVG(indice_cintura_talla) AS ict_prom,
             AVG(sumatoria_6_pliegues) AS sumatoria_prom,
             AVG(endomorfia) AS endomorfia_prom,
             AVG(mesomorfia) AS mesomorfia_prom,
@@ -448,7 +468,11 @@ def detalle_grupo_ultimas_mediciones(grupo_id: int) -> pd.DataFrame:
             ORDER BY m.atleta_id, m.fecha_medicion DESC, m.fecha_hora_carga DESC
         )
         SELECT a.nombre, a.apellido, a.sexo, a.edad, u.fecha_medicion,
-               u.peso, u.altura, u.imc, u.porcentaje_grasa, u.porcentaje_musculo,
+               u.peso, u.altura, u.imc,
+               u.pct_musculo_esqueletico, u.bio_grasa_corporal, u.bio_grasa_visceral,
+               u.cintura, u.cadera, u.pliegue_abdominal,
+               u.indice_cintura_cadera, u.indice_cintura_talla,
+               u.porcentaje_grasa, u.porcentaje_musculo,
                u.sumatoria_6_pliegues, u.endomorfia, u.mesomorfia, u.ectomorfia,
                u.coord_x, u.coord_y
         FROM ultima u
