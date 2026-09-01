@@ -346,6 +346,32 @@ def crear_medicion(data: dict) -> int:
     return medicion_id
 
 
+def actualizar_medicion(medicion_id: int, data: dict) -> None:
+    with get_session() as s:
+        m = s.get(Medicion, medicion_id)
+        if m:
+            for campo, valor in data.items():
+                setattr(m, campo, valor)
+    listar_mediciones_atleta.clear()
+    obtener_ultima_medicion.clear()
+    listar_ultimas_mediciones.clear()
+    estadisticas_grupo.clear()
+    detalle_grupo_ultimas_mediciones.clear()
+
+
+def eliminar_medicion(medicion_id: int) -> None:
+    with get_session() as s:
+        m = s.get(Medicion, medicion_id)
+        if m:
+            s.delete(m)
+    listar_mediciones_atleta.clear()
+    obtener_ultima_medicion.clear()
+    listar_ultimas_mediciones.clear()
+    estadisticas_grupo.clear()
+    detalle_grupo_ultimas_mediciones.clear()
+    contar_mediciones.clear()
+
+
 @st.cache_data(ttl=30, show_spinner=False)
 def listar_mediciones_atleta(atleta_id: int) -> pd.DataFrame:
     return pd.read_sql_query(

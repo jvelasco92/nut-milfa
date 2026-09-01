@@ -13,7 +13,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import (
@@ -39,7 +39,7 @@ MUTED_COLOR = colors.HexColor(branding.COLOR_TEXT_MUTED)
 def _dibujar_encabezado(canvas_obj, doc):
     """Header de marca (logo + nombre + nutricionistas) repetido en cada página."""
     canvas_obj.saveState()
-    width, height = A4
+    width, height = doc.pagesize
     y = height - 1.35 * cm
 
     r = 0.5 * cm
@@ -541,5 +541,89 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
 
     buffer = io.BytesIO()
     wb.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# PDF: Estadística de grupo
+# ---------------------------------------------------------------------------
+_ANCHOS_COLUMNAS_GRUPO_PDF = [2.3, 2.3, 2.1, 1.5, 1.3, 1.5, 1.9, 1.7, 1.7, 1.8, 1.6, 1.9, 1.7, 1.7]  # cm
+
+
+def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas: dict) -> bytes:
+    """Reporte PDF de estadística grupal: promedios + tabla por atleta con semáforo."""
+    df = df_detalle.copy()
+    df["talla_m"] = df["altura"].apply(lambda v: round(v / 100, 2) if pd.notna(v) else None)
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), topMargin=2.6 * cm, bottomMargin=1.5 * cm,
+                             leftMargin=1.3 * cm, rightMargin=1.3 * cm)
+    styles = _base_styles()
+    story = []
+
+    story.append(Paragraph(f"Estadística de Grupo: {nombre_grupo}", styles["TituloApp"]))
+
+    def _r(v):
+        return round(v, 2) if isinstance(v, (int, float)) and pd.notna(v) else "-"
+
+    story.append(Paragraph("Promedios del Grupo", styles["Seccion"]))
+    story.append(_tabla_datos([
+        ("Atletas con medición", _fmt(int(estadisticas.get("cantidad_atletas") or 0))),
+        ("IMC promedio", _fmt(_r(estadisticas.get("imc_prom")))),
+        ("% Grasa corporal promedio", _fmt(_r(estadisticas.get("grasa_prom")), " %" if estadisticas.get("grasa_prom") else "")),
+        ("% Músculo esquelético promedio", _fmt(_r(estadisticas.get("musculo_prom")), " %" if estadisticas.get("musculo_prom") else "")),
+        ("% Grasa visceral promedio", _fmt(_r(estadisticas.get("grasa_visceral_prom")))),
+        ("Índice cintura/cadera promedio", _fmt(_r(estadisticas.get("icc_prom")))),
+        ("Índice cintura/talla promedio", _fmt(_r(estadisticas.get("ict_prom")))),
+    ], col_widths=(8 * cm, 5 * cm)))
+
+    story.append(Paragraph("Detalle por Atleta (última medición)", styles["Seccion"]))
+    headers = [titulo for _, titulo, _ in _COLUMNAS_GRUPO]
+    data = [headers]
+    filas_color = []
+    for _, fila in df.iterrows():
+        sexo = fila.get("sexo", "Masculino")
+        fila_valores = []
+        fila_colores = []
+        for campo, _, metrica_ref in _COLUMNAS_GRUPO:
+            valor = fila.get(campo)
+            valor = None if pd.isna(valor) else valor
+            fila_valores.append(_fmt(valor))
+            if metrica_ref:
+                _, color = som.clasificar_metrica(metrica_ref, valor, sexo)
+                fila_colores.append(None if color == som.COLOR_SIN_DATO else color)
+            else:
+                fila_colores.append(None)
+        data.append(fila_valores)
+        filas_color.append(fila_colores)
+
+    col_widths = [w * cm for w in _ANCHOS_COLUMNAS_GRUPO_PDF]
+    t = Table(data, colWidths=col_widths, repeatRows=1)
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.lightgrey),
+        ("ALIGN", (2, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]
+    for r_idx, fila_colores in enumerate(filas_color, start=1):
+        for c_idx, color_hex in enumerate(fila_colores):
+            if color_hex:
+                bg = colors.HexColor(color_hex)
+                texto = colors.black if color_hex.upper() == som.COLOR_AMARILLO.upper() else colors.white
+                style += [
+                    ("BACKGROUND", (c_idx, r_idx), (c_idx, r_idx), bg),
+                    ("TEXTCOLOR", (c_idx, r_idx), (c_idx, r_idx), texto),
+                    ("FONTNAME", (c_idx, r_idx), (c_idx, r_idx), "Helvetica-Bold"),
+                ]
+    t.setStyle(TableStyle(style))
+    story.append(t)
+
+    doc.build(story, onFirstPage=_dibujar_encabezado, onLaterPages=_dibujar_encabezado)
     buffer.seek(0)
     return buffer.getvalue()
