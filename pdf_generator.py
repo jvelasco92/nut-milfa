@@ -627,3 +627,24 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
     doc.build(story, onFirstPage=_dibujar_encabezado, onLaterPages=_dibujar_encabezado)
     buffer.seek(0)
     return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Backup completo (todas las tablas, sin procesar)
+# ---------------------------------------------------------------------------
+def generar_excel_backup_completo(tablas: dict) -> bytes:
+    """tablas: dict {'grupos': df, 'atletas': df, 'mediciones': df} tal cual vienen de la base."""
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        resumen = pd.DataFrame([{
+            "Generado": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Grupos": len(tablas["grupos"]),
+            "Atletas": len(tablas["atletas"]),
+            "Mediciones": len(tablas["mediciones"]),
+        }])
+        resumen.to_excel(writer, index=False, sheet_name="Resumen")
+        tablas["grupos"].to_excel(writer, index=False, sheet_name="Grupos")
+        tablas["atletas"].to_excel(writer, index=False, sheet_name="Atletas")
+        tablas["mediciones"].to_excel(writer, index=False, sheet_name="Mediciones")
+    buffer.seek(0)
+    return buffer.getvalue()

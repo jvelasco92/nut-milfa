@@ -443,7 +443,9 @@ def pagina_perfil_atleta():
 def pagina_exportar():
     st.title("📑 Exportar & Reportes")
 
-    tab1, tab2, tab3 = st.tabs(["📄 Reporte Individual", "📈 Historial Individual", "👥 Estadística por Grupo"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📄 Reporte Individual", "📈 Historial Individual", "👥 Estadística por Grupo", "💾 Backup Completo",
+    ])
 
     # --- Reporte individual (PDF) ---
     with tab1:
@@ -556,6 +558,28 @@ def pagina_exportar():
                     file_name=f"estadistica_{grupo_nombre}.pdf",
                     mime="application/pdf", use_container_width=True,
                 )
+
+    # --- Backup completo ---
+    with tab4:
+        st.write(
+            "Descarga un Excel con **todo** lo que hay cargado en la base "
+            "(grupos, atletas y mediciones, con todas sus columnas) como resguardo. "
+            "Recomendado hacerlo cada tanto, sobre todo antes de borrar un grupo o un atleta."
+        )
+        tablas = db.exportar_todo()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Grupos", len(tablas["grupos"]))
+        c2.metric("Atletas", len(tablas["atletas"]))
+        c3.metric("Mediciones", len(tablas["mediciones"]))
+
+        excel_backup = pdfgen.generar_excel_backup_completo(tablas)
+        fecha_str = date.today().strftime("%Y-%m-%d")
+        st.download_button(
+            "⬇️ Descargar backup completo (Excel)", data=excel_backup,
+            file_name=f"backup_nutmilfa_{fecha_str}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True, type="primary",
+        )
 
 
 # ---------------------------------------------------------------------------

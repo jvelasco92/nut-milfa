@@ -98,5 +98,28 @@ configurados y empezá a cargar grupos, atletas y mediciones.
 
 - Para agregar más nutricionistas, sumá más pares `usuario = "clave"` dentro
   de `[auth.users]` en los secrets (local y en Streamlit Cloud).
-- Para respaldar los datos, usá el **Database Backups** de Supabase o
-  exportá desde la pestaña "📑 Exportar & Reportes" de la app.
+
+## 7. Backups
+
+Hay dos formas de resguardar los datos, pensadas para usarse seguido —
+sobre todo antes de borrar un grupo o un atleta (el borrado es en cascada
+y no se puede deshacer desde la app):
+
+- **Desde la app** (la más simple): pestaña "📑 Exportar & Reportes →
+  💾 Backup Completo". Descarga un Excel con las tres tablas completas
+  (grupos, atletas, mediciones).
+- **Dump SQL completo** (más técnico, restaurable con `psql`):
+  ```bash
+  source .venv/bin/activate
+  python3 backup_db.py
+  ```
+  Genera `backups/backup_<fecha>.sql`. Esa carpeta está en `.gitignore`
+  **a propósito**: contiene datos de salud reales de personas, y no debe
+  subirse a git ni siquiera a un repo privado (queda para siempre en el
+  historial). Guardá esos archivos en otro lado (un disco externo, una
+  carpeta cifrada, etc.), nunca en el repositorio.
+
+Adicionalmente, Supabase ofrece **Database Backups** automáticos en sus
+planes pagos (point-in-time recovery) — recomendable si los datos se
+vuelven críticos, ya que el plan gratuito no los incluye y además pausa
+proyectos inactivos por ~1 semana.

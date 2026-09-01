@@ -507,3 +507,15 @@ def detalle_grupo_ultimas_mediciones(grupo_id: int) -> pd.DataFrame:
         """
     )
     return pd.read_sql_query(sql, get_engine(), params={"grupo_id": grupo_id})
+
+
+# ---------------------------------------------------------------------------
+# Backup / exportación completa
+# ---------------------------------------------------------------------------
+def exportar_todo() -> dict:
+    """Trae las tres tablas completas, tal cual están en la base, para backup."""
+    return {
+        "grupos": pd.read_sql_query(text("SELECT * FROM grupos ORDER BY id"), get_engine()),
+        "atletas": pd.read_sql_query(text("SELECT * FROM atletas ORDER BY id"), get_engine()),
+        "mediciones": pd.read_sql_query(text("SELECT * FROM mediciones ORDER BY id"), get_engine()),
+    }
