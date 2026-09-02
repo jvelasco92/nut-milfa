@@ -12,9 +12,9 @@ COLOR_ACCENT = "#8bc34a"        # Verde lima — energía / deporte
 COLOR_TEXT_MUTED = "#5a6b70"
 COLOR_RING = "#bcdad0"
 
-NOMBRE_APP = "Nut-Milfa"
+NOMBRE_APP = "Nut-MiFa"
 TAGLINE = "NUTRICIÓN DEPORTIVA"
-NUTRICIONISTAS = "Lic. Sol Mileo MP: 4743  |  Lic. Lucila Fassano MP: 4770"
+NUTRICIONISTAS = "Lic. Sol Mileo MP: 4743  |  Lic. Lucila Fassano MP: 4770  |  Antropometrista ISAK 1"
 
 _LOGO_SVG = """<svg width="{size}" height="{size}" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
   <circle cx="30" cy="30" r="29" fill="none" stroke="{ring}" stroke-width="1.5"/>

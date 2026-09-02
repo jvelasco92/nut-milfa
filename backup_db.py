@@ -31,7 +31,7 @@ def generar_dump_sql() -> str:
     cursor = raw_conn.cursor()
 
     lineas = [
-        f"-- Backup Nut-Milfa generado el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"-- Backup Nut-MiFa generado el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         "-- Restaurar con: psql \"<DATABASE_URL>\" -f este_archivo.sql",
         "-- (la base destino debe tener las tablas ya creadas, ej. corriendo database.init_db())",
         "",
