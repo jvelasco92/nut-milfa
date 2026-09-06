@@ -206,7 +206,9 @@ def _delta_texto(actual, anterior, suf=""):
     return f"{signo}{diff}{suf}"
 
 
-def generar_pdf_ficha_individual(atleta: dict, medicion: dict, medicion_anterior: dict = None) -> bytes:
+def generar_pdf_ficha_individual(
+    atleta: dict, medicion: dict, medicion_anterior: dict = None, incluir_somatocarta: bool = True
+) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2.6 * cm, bottomMargin=1.5 * cm)
     styles = _base_styles()
@@ -327,7 +329,7 @@ def generar_pdf_ficha_individual(atleta: dict, medicion: dict, medicion_anterior
             ("Coordenadas (X, Y)", f"({_fmt(medicion.get('coord_x'))}, {_fmt(medicion.get('coord_y'))})"),
         ]))
         x, y = medicion.get("coord_x"), medicion.get("coord_y")
-        if x is not None and y is not None:
+        if incluir_somatocarta and x is not None and y is not None:
             story.append(Spacer(1, 10))
             story.append(Image(_grafico_somatocarta_png([(x, y)]), width=11 * cm, height=8.8 * cm))
 
@@ -357,7 +359,7 @@ def generar_pdf_ficha_individual(atleta: dict, medicion: dict, medicion_anterior
 # ---------------------------------------------------------------------------
 # PDF: Historial
 # ---------------------------------------------------------------------------
-def generar_pdf_historial(atleta: dict, df_historial: pd.DataFrame) -> bytes:
+def generar_pdf_historial(atleta: dict, df_historial: pd.DataFrame, incluir_somatocarta: bool = True) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2.6 * cm, bottomMargin=1.5 * cm)
     styles = _base_styles()
@@ -394,7 +396,7 @@ def generar_pdf_historial(atleta: dict, df_historial: pd.DataFrame) -> bytes:
         story.append(Image(_grafico_evolucion_png(df_historial), width=15 * cm, height=8 * cm))
 
     puntos = list(zip(df_historial["coord_x"].dropna(), df_historial["coord_y"].dropna()))
-    if puntos:
+    if incluir_somatocarta and puntos:
         story.append(Paragraph("Somatocarta - Evolución", styles["Seccion"]))
         story.append(Image(_grafico_somatocarta_png(puntos), width=11 * cm, height=8.8 * cm))
 
@@ -481,6 +483,17 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
 
     for col_idx in range(1, n_cols + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = 16
+
+    nota_row = header_row + len(df) + 2
+    ws.merge_cells(start_row=nota_row, start_column=1, end_row=nota_row, end_column=n_cols)
+    ws.cell(
+        row=nota_row, column=1,
+        value=(
+            "Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético todavía no "
+            "tienen referencia cargada para mujeres; en esas columnas las atletas mujeres quedan sin color "
+            "(ver hoja Referencias)."
+        ),
+    ).font = Font(italic=True, size=9)
 
     # --- Hoja de referencias (leyenda de colores y umbrales) ---
     ws_ref = wb.create_sheet("Referencias")
@@ -579,6 +592,12 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
     ], col_widths=(8 * cm, 5 * cm)))
 
     story.append(Paragraph("Detalle por Atleta (última medición)", styles["Seccion"]))
+    story.append(Paragraph(
+        "Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético todavía no "
+        "tienen referencia cargada para mujeres; en esas columnas las atletas mujeres se muestran sin color.",
+        styles["Normal"],
+    ))
+    story.append(Spacer(1, 6))
     headers = [titulo for _, titulo, _ in _COLUMNAS_GRUPO]
     data = [headers]
     filas_color = []

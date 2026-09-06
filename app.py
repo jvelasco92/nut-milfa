@@ -3,6 +3,8 @@ App de Nutrición Deportiva - Streamlit + Supabase (PostgreSQL)
 
 Ejecutar con: streamlit run app.py
 """
+import io
+import zipfile
 from datetime import datetime, date
 
 import pandas as pd
@@ -437,6 +439,24 @@ def pagina_perfil_atleta():
         st.plotly_chart(fig, use_container_width=True)
 
 
+def _generar_zip_fichas_grupo(grupo_id: int, incluir_somatocarta: bool = True) -> bytes:
+    """Genera un ZIP con la ficha PDF individual (última medición) de cada atleta del grupo."""
+    df_atletas_grupo = db.listar_atletas(grupo_id=grupo_id)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for _, row in df_atletas_grupo.iterrows():
+            atleta = db.obtener_atleta(row["id"])
+            medicion = db.obtener_ultima_medicion(atleta["id"])
+            if not medicion:
+                continue
+            df_hist_atleta = db.listar_mediciones_atleta(atleta["id"])
+            medicion_anterior = df_hist_atleta.iloc[-2].to_dict() if len(df_hist_atleta) >= 2 else None
+            pdf_bytes = pdfgen.generar_pdf_ficha_individual(atleta, medicion, medicion_anterior, incluir_somatocarta)
+            zf.writestr(f"ficha_{atleta['apellido']}_{atleta['nombre']}.pdf", pdf_bytes)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # Página: Exportar & Reportes
 # ---------------------------------------------------------------------------
@@ -461,9 +481,12 @@ def pagina_exportar():
                 st.warning("Este atleta no tiene mediciones cargadas.")
             else:
                 st.caption(f"Se generará la ficha con la última medición: {medicion['fecha_medicion']}")
+                incluir_somatocarta = st.checkbox(
+                    "Incluir gráfico de somatocarta", value=True, key="chk_somato_individual",
+                )
                 df_hist_atleta = db.listar_mediciones_atleta(atleta["id"])
                 medicion_anterior = df_hist_atleta.iloc[-2].to_dict() if len(df_hist_atleta) >= 2 else None
-                pdf_bytes = pdfgen.generar_pdf_ficha_individual(atleta, medicion, medicion_anterior)
+                pdf_bytes = pdfgen.generar_pdf_ficha_individual(atleta, medicion, medicion_anterior, incluir_somatocarta)
                 st.download_button(
                     "⬇️ Descargar Ficha PDF", data=pdf_bytes,
                     file_name=f"ficha_{atleta['apellido']}_{atleta['nombre']}.pdf",
@@ -484,6 +507,9 @@ def pagina_exportar():
                 st.warning("Este atleta no tiene mediciones cargadas.")
             else:
                 st.dataframe(df_hist, use_container_width=True, hide_index=True)
+                incluir_somatocarta_hist = st.checkbox(
+                    "Incluir gráfico de somatocarta", value=True, key="chk_somato_historial",
+                )
                 c1, c2 = st.columns(2)
                 excel_bytes = pdfgen.generar_excel_historial(atleta, df_hist)
                 c1.download_button(
@@ -492,7 +518,7 @@ def pagina_exportar():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
-                pdf_bytes = pdfgen.generar_pdf_historial(atleta, df_hist)
+                pdf_bytes = pdfgen.generar_pdf_historial(atleta, df_hist, incluir_somatocarta_hist)
                 c2.download_button(
                     "⬇️ Descargar PDF", data=pdf_bytes,
                     file_name=f"historial_{atleta['apellido']}_{atleta['nombre']}.pdf",
@@ -542,6 +568,11 @@ def pagina_exportar():
                     st.plotly_chart(som.crear_grafico_somatocarta(puntos, titulo=f"Somatotipo grupal - {grupo_nombre}"), use_container_width=True)
 
                 st.subheader("Detalle por atleta (última medición)")
+                st.caption(
+                    "Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético "
+                    "todavía no tienen referencia cargada para mujeres; en el Excel/PDF del grupo esas "
+                    "columnas quedan sin color para las atletas mujeres."
+                )
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
 
                 c1, c2 = st.columns(2)
@@ -557,6 +588,22 @@ def pagina_exportar():
                     "⬇️ Descargar PDF del grupo", data=pdf_bytes_grupo,
                     file_name=f"estadistica_{grupo_nombre}.pdf",
                     mime="application/pdf", use_container_width=True,
+                )
+
+                st.divider()
+                st.subheader("Fichas individuales del grupo")
+                st.caption(
+                    "Genera la ficha PDF individual (última medición) de cada atleta del grupo "
+                    "y las junta en un único archivo ZIP para descargar de una sola vez."
+                )
+                incluir_somatocarta_zip = st.checkbox(
+                    "Incluir gráfico de somatocarta en las fichas", value=True, key="chk_somato_zip_grupo",
+                )
+                zip_bytes = _generar_zip_fichas_grupo(grupo_id, incluir_somatocarta_zip)
+                st.download_button(
+                    "📦 Descargar fichas individuales (ZIP)", data=zip_bytes,
+                    file_name=f"fichas_{grupo_nombre}.zip",
+                    mime="application/zip", use_container_width=True,
                 )
 
     # --- Backup completo ---
