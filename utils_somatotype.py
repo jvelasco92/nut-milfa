@@ -177,12 +177,13 @@ def calcular_somatotipo(
 
 
 # ---------------------------------------------------------------------------
-# Semáforo de referencias (colores y umbrales tomados de la planilla de las
-# nutricionistas: "PRESENTACIÓN DE INFORME.xlsx" / hoja "DATOS DE LAS PERSONAS").
-# Las métricas marcadas como "unisex" no traían distinción por sexo en la
-# planilla; las de "Circ. cintura", "ICC", "ICT" y "% músculo esquelético"
-# sólo estaban definidas para hombres (18-39 años en el caso muscular) — para
-# mujeres no hay referencia todavía, así que se muestran sin clasificar.
+# Semáforo de referencias (colores y umbrales tomados de "inputs/puntos de
+# corte.xlsx"): IMC (OMS 1997/2000); % músculo esquelético y grasa visceral
+# (OMRON HBF-514C); % grasa corporal (Gallagher et al. 2000); circunferencia
+# de cintura e índice cintura/cadera (OMS 2011); índice cintura/talla.
+# % músculo esquelético y % grasa corporal distinguen, además del sexo, la
+# franja etaria (25-39, 40-59, 60-65 años); fuera de esas franjas no hay
+# referencia cargada y se muestran sin clasificar.
 # ---------------------------------------------------------------------------
 COLOR_VERDE = "#2e7d32"
 COLOR_AMARILLO = "#f2c400"
@@ -192,7 +193,12 @@ COLOR_CIAN = "#00acc1"
 COLOR_AZUL = "#4a86e8"
 COLOR_SIN_DATO = "#9aa5a9"
 
-# Cada regla: (límite_inferior_exclusivo_o_None, límite_superior_exclusivo_o_None, etiqueta, color)
+# Franjas etarias con referencia cargada para % músculo esquelético y % grasa corporal.
+BANDAS_EDAD = [(25, 39), (40, 59), (60, 65)]
+
+# Cada regla: (mínimo_inclusivo_o_None, máximo_exclusivo_o_None, etiqueta, color)
+
+# Métricas sin distinción por sexo ni edad.
 _REFERENCIAS_UNISEX = {
     "imc": [
         (None, 18.5, "BAJO PESO", COLOR_AMARILLO),
@@ -200,82 +206,188 @@ _REFERENCIAS_UNISEX = {
         (25.0, 30.0, "SOBREPESO", COLOR_NARANJA),
         (30.0, None, "OBESIDAD", COLOR_ROJO),
     ],
-    "grasa_corporal_pct": [
-        (None, 8, "BAJO", COLOR_AMARILLO),
-        (8, 20, "NORMAL", COLOR_VERDE),
-        (20, 25, "ALTO", COLOR_NARANJA),
-        (25, None, "MUY ALTO", COLOR_ROJO),
-    ],
     "grasa_visceral": [
-        (None, 9, "FAVORABLE", COLOR_VERDE),
-        (9, None, "ELEVADO", COLOR_ROJO),
+        (None, 10, "NORMAL", COLOR_VERDE),
+        (10, 15, "ALTO", COLOR_NARANJA),
+        (15, None, "MUY ALTO", COLOR_ROJO),
     ],
     "pliegue_abdominal": [
         (None, 12, "FAVORABLE", COLOR_VERDE),
         (12, None, "ELEVADO", COLOR_ROJO),
     ],
-}
-
-# Sólo definidas por la planilla para "Masculino".
-_REFERENCIAS_MASCULINO = {
-    "circ_cintura": [
-        (None, 94, "SIN RIESGO", COLOR_VERDE),
-        (94, 102, "RIESGO MODERADO", COLOR_AMARILLO),
-        (102, None, "RIESGO ALTO", COLOR_ROJO),
-    ],
-    "indice_cintura_cadera": [
-        (None, 0.90, "FAVORABLE", COLOR_VERDE),
-        (0.90, 1.00, "ELEVADO", COLOR_AMARILLO),
-        (1.00, None, "ALTO", COLOR_ROJO),
-    ],
     "indice_cintura_talla": [
-        (None, 0.50, "FAVORABLE", COLOR_VERDE),
-        (0.50, 0.60, "ELEVADO", COLOR_AMARILLO),
-        (0.60, None, "ALTO", COLOR_ROJO),
-    ],
-    "musculo_esqueletico_pct": [
-        (None, 33.3, "BAJO", COLOR_ROJO),
-        (33.3, 39.4, "NORMAL", COLOR_VERDE),
-        (39.4, 44.1, "ALTO", COLOR_CIAN),
-        (44.1, None, "MUY ALTO", COLOR_AZUL),
+        (None, 0.50, "SIN RIESGO", COLOR_VERDE),
+        (0.50, None, "RIESGO AUMENTADO", COLOR_ROJO),
     ],
 }
 
-METRICAS_SOLO_MASCULINO = set(_REFERENCIAS_MASCULINO.keys())
+# Métricas con distinción por sexo, sin franja etaria.
+_REFERENCIAS_SEXO = {
+    "circ_cintura": {
+        "Femenino": [
+            (None, 80, "RIESGO NORMAL", COLOR_VERDE),
+            (80, 88, "RIESGO AUMENTADO", COLOR_AMARILLO),
+            (88, None, "RIESGO SUST. AUMENTADO", COLOR_ROJO),
+        ],
+        "Masculino": [
+            (None, 94, "RIESGO NORMAL", COLOR_VERDE),
+            (94, 102, "RIESGO AUMENTADO", COLOR_AMARILLO),
+            (102, None, "RIESGO SUST. AUMENTADO", COLOR_ROJO),
+        ],
+    },
+    "indice_cintura_cadera": {
+        "Femenino": [
+            (None, 0.85, "BAJO RIESGO", COLOR_VERDE),
+            (0.85, None, "RIESGO AUMENTADO", COLOR_ROJO),
+        ],
+        "Masculino": [
+            (None, 0.90, "BAJO RIESGO", COLOR_VERDE),
+            (0.90, None, "RIESGO AUMENTADO", COLOR_ROJO),
+        ],
+    },
+}
+
+# Métricas con distinción por sexo y franja etaria.
+_REFERENCIAS_EDAD_SEXO = {
+    "musculo_esqueletico_pct": {
+        (25, 39): {
+            "Femenino": [
+                (None, 24.3, "BAJO", COLOR_ROJO),
+                (24.3, 30.4, "NORMAL", COLOR_VERDE),
+                (30.4, 35.4, "ALTO", COLOR_CIAN),
+                (35.4, None, "MUY ALTO", COLOR_AZUL),
+            ],
+            "Masculino": [
+                (None, 33.3, "BAJO", COLOR_ROJO),
+                (33.3, 39.4, "NORMAL", COLOR_VERDE),
+                (39.4, 44.1, "ALTO", COLOR_CIAN),
+                (44.1, None, "MUY ALTO", COLOR_AZUL),
+            ],
+        },
+        (40, 59): {
+            "Femenino": [
+                (None, 24.1, "BAJO", COLOR_ROJO),
+                (24.1, 30.2, "NORMAL", COLOR_VERDE),
+                (30.2, 35.2, "ALTO", COLOR_CIAN),
+                (35.2, None, "MUY ALTO", COLOR_AZUL),
+            ],
+            "Masculino": [
+                (None, 33.1, "BAJO", COLOR_ROJO),
+                (33.1, 39.2, "NORMAL", COLOR_VERDE),
+                (39.2, 43.9, "ALTO", COLOR_CIAN),
+                (43.9, None, "MUY ALTO", COLOR_AZUL),
+            ],
+        },
+        (60, 65): {
+            "Femenino": [
+                (None, 23.9, "BAJO", COLOR_ROJO),
+                (23.9, 30.0, "NORMAL", COLOR_VERDE),
+                (30.0, 35.0, "ALTO", COLOR_CIAN),
+                (35.0, None, "MUY ALTO", COLOR_AZUL),
+            ],
+            "Masculino": [
+                (None, 32.9, "BAJO", COLOR_ROJO),
+                (32.9, 39.0, "NORMAL", COLOR_VERDE),
+                (39.0, 43.7, "ALTO", COLOR_CIAN),
+                (43.7, None, "MUY ALTO", COLOR_AZUL),
+            ],
+        },
+    },
+    "grasa_corporal_pct": {
+        (25, 39): {
+            "Femenino": [
+                (None, 21.0, "BAJO", COLOR_AMARILLO),
+                (21.0, 33.0, "NORMAL", COLOR_VERDE),
+                (33.0, 39.0, "ALTO", COLOR_NARANJA),
+                (39.0, None, "MUY ALTO", COLOR_ROJO),
+            ],
+            "Masculino": [
+                (None, 8.0, "BAJO", COLOR_AMARILLO),
+                (8.0, 20.0, "NORMAL", COLOR_VERDE),
+                (20.0, 25.0, "ALTO", COLOR_NARANJA),
+                (25.0, None, "MUY ALTO", COLOR_ROJO),
+            ],
+        },
+        (40, 59): {
+            "Femenino": [
+                (None, 23.0, "BAJO", COLOR_AMARILLO),
+                (23.0, 34.0, "NORMAL", COLOR_VERDE),
+                (34.0, 40.0, "ALTO", COLOR_NARANJA),
+                (40.0, None, "MUY ALTO", COLOR_ROJO),
+            ],
+            "Masculino": [
+                (None, 11.0, "BAJO", COLOR_AMARILLO),
+                (11.0, 22.0, "NORMAL", COLOR_VERDE),
+                (22.0, 28.0, "ALTO", COLOR_NARANJA),
+                (28.0, None, "MUY ALTO", COLOR_ROJO),
+            ],
+        },
+        (60, 65): {
+            "Femenino": [
+                (None, 24.0, "BAJO", COLOR_AMARILLO),
+                (24.0, 36.0, "NORMAL", COLOR_VERDE),
+                (36.0, 42.0, "ALTO", COLOR_NARANJA),
+                (42.0, None, "MUY ALTO", COLOR_ROJO),
+            ],
+            "Masculino": [
+                (None, 13.0, "BAJO", COLOR_AMARILLO),
+                (13.0, 25.0, "NORMAL", COLOR_VERDE),
+                (25.0, 30.0, "ALTO", COLOR_NARANJA),
+                (30.0, None, "MUY ALTO", COLOR_ROJO),
+            ],
+        },
+    },
+}
 
 
-def reglas_referencia(metrica: str) -> list[tuple]:
+def _banda_edad(edad):
+    if edad is None:
+        return None
+    for banda in BANDAS_EDAD:
+        if banda[0] <= edad <= banda[1]:
+            return banda
+    return None
+
+
+def _reglas_para(metrica: str, sexo: str = "Masculino", edad: int = None):
+    """Reglas (mínimo, máximo, etiqueta, color) para metrica/sexo/edad, o None si no hay referencia cargada."""
+    if metrica in _REFERENCIAS_UNISEX:
+        return _REFERENCIAS_UNISEX[metrica]
+    if metrica in _REFERENCIAS_SEXO:
+        return _REFERENCIAS_SEXO[metrica].get(sexo)
+    if metrica in _REFERENCIAS_EDAD_SEXO:
+        banda = _banda_edad(edad)
+        if banda is None:
+            return None
+        return _REFERENCIAS_EDAD_SEXO[metrica][banda].get(sexo)
+    return None
+
+
+def reglas_referencia(metrica: str, sexo: str = "Masculino", edad: int = None) -> list[tuple]:
     """Lista de reglas (mínimo, máximo, etiqueta, color) usada para clasificar
-    esa métrica, sin importar el sexo (útil para armar leyendas)."""
-    return _REFERENCIAS_UNISEX.get(metrica) or _REFERENCIAS_MASCULINO.get(metrica, [])
+    esa métrica (útil para armar leyendas)."""
+    return _reglas_para(metrica, sexo, edad) or []
 
 
-def clasificar_metrica(metrica: str, valor: float, sexo: str = "Masculino") -> tuple[str, str]:
-    """Devuelve (etiqueta, color_hex) para un valor según las referencias de la
-    planilla. Si no hay valor cargado o no hay referencia para el sexo indicado,
-    devuelve ("Sin dato", color gris)."""
+def clasificar_metrica(metrica: str, valor: float, sexo: str = "Masculino", edad: int = None) -> tuple[str, str]:
+    """Devuelve (etiqueta, color_hex) para un valor según las referencias de
+    'puntos de corte.xlsx'. Si no hay valor cargado, o no hay referencia para
+    ese sexo/edad, devuelve ("Sin dato"/"Sin referencia", color gris)."""
     if valor is None or valor == 0:
         return "Sin dato", COLOR_SIN_DATO
 
-    reglas = _REFERENCIAS_UNISEX.get(metrica)
-    if reglas is None:
-        if metrica in _REFERENCIAS_MASCULINO and sexo == "Masculino":
-            reglas = _REFERENCIAS_MASCULINO[metrica]
-        else:
-            return "Sin referencia", COLOR_SIN_DATO
+    reglas = _reglas_para(metrica, sexo, edad)
+    if not reglas:
+        return "Sin referencia", COLOR_SIN_DATO
 
     for minimo, maximo, etiqueta, color in reglas:
-        if minimo is not None and valor <= minimo:
+        if minimo is not None and valor < minimo:
             continue
         if maximo is not None and valor >= maximo:
             continue
         return etiqueta, color
 
-    # Si no encajó en ningún tramo intermedio, usar el primero o el último según corresponda.
-    primero = reglas[0]
     ultimo = reglas[-1]
-    if primero[0] is None and valor <= primero[1]:
-        return primero[2], primero[3]
     return ultimo[2], ultimo[3]
 
 

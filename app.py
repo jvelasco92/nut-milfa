@@ -227,28 +227,32 @@ def formulario_medicion(atleta: dict, key_prefix: str, valores: dict = None) -> 
     st.divider()
     st.subheader("Resultados con referencia (semáforo)")
     sexo = atleta["sexo"]
+    edad_medicion = som.calcular_edad(atleta.get("fecha_nacimiento"), fecha_medicion)
     m1, m2 = st.columns(2)
     with m1:
-        et, co = som.clasificar_metrica("imc", imc, sexo)
+        et, co = som.clasificar_metrica("imc", imc, sexo, edad_medicion)
         branding.render_metric_badge("IMC (kg/m²)", imc or "-", et, co)
-        et, co = som.clasificar_metrica("grasa_corporal_pct", bio_grasa_corporal, sexo)
+        et, co = som.clasificar_metrica("grasa_corporal_pct", bio_grasa_corporal, sexo, edad_medicion)
         branding.render_metric_badge("% Grasa corporal estimado", bio_grasa_corporal or "-", et, co)
-        et, co = som.clasificar_metrica("grasa_visceral", bio_grasa_visceral, sexo)
+        et, co = som.clasificar_metrica("grasa_visceral", bio_grasa_visceral, sexo, edad_medicion)
         branding.render_metric_badge("% Grasa visceral estimada", bio_grasa_visceral or "-", et, co)
-        et, co = som.clasificar_metrica("musculo_esqueletico_pct", pct_musculo_esqueletico, sexo)
+        et, co = som.clasificar_metrica("musculo_esqueletico_pct", pct_musculo_esqueletico, sexo, edad_medicion)
         branding.render_metric_badge("% Músculo esquelético estimado", pct_musculo_esqueletico or "-", et, co)
     with m2:
-        et, co = som.clasificar_metrica("pliegue_abdominal", pliegue_abdominal, sexo)
+        et, co = som.clasificar_metrica("pliegue_abdominal", pliegue_abdominal, sexo, edad_medicion)
         branding.render_metric_badge("Pliegue abdominal (mm)", pliegue_abdominal or "-", et, co)
-        et, co = som.clasificar_metrica("circ_cintura", cintura, sexo)
+        et, co = som.clasificar_metrica("circ_cintura", cintura, sexo, edad_medicion)
         branding.render_metric_badge("Circ. cintura (cm)", cintura or "-", et, co)
-        et, co = som.clasificar_metrica("indice_cintura_cadera", indice_cc, sexo)
+        et, co = som.clasificar_metrica("indice_cintura_cadera", indice_cc, sexo, edad_medicion)
         branding.render_metric_badge("Índice cintura/cadera", indice_cc or "-", et, co)
-        et, co = som.clasificar_metrica("indice_cintura_talla", indice_ct, sexo)
+        et, co = som.clasificar_metrica("indice_cintura_talla", indice_ct, sexo, edad_medicion)
         branding.render_metric_badge("Índice cintura/talla", indice_ct or "-", et, co)
 
-    if sexo == "Femenino":
-        st.caption("⚠️ Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético solo tienen referencia cargada para hombres — se muestran sin clasificar para mujeres hasta contar con esos valores.")
+    if edad_medicion and not (25 <= edad_medicion <= 65):
+        st.caption(
+            "⚠️ % Grasa corporal y % músculo esquelético solo tienen referencia cargada entre "
+            "25 y 65 años — con esta edad se muestran sin clasificar."
+        )
 
     if any([pliegue_tricipital, pliegue_subescapular, pliegue_suprailiaco, pliegue_muslo, pliegue_pantorrilla]):
         st.subheader("Resultados ISAK avanzados")
@@ -570,9 +574,8 @@ def pagina_exportar():
 
                 st.subheader("Detalle por atleta (última medición)")
                 st.caption(
-                    "Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético "
-                    "todavía no tienen referencia cargada para mujeres; en el Excel/PDF del grupo esas "
-                    "columnas quedan sin color para las atletas mujeres."
+                    "% Grasa corporal y % músculo esquelético solo tienen referencia cargada entre 25 y 65 "
+                    "años; en el Excel/PDF del grupo esas columnas quedan sin color fuera de ese rango."
                 )
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
 

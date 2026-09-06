@@ -255,17 +255,17 @@ def generar_pdf_ficha_individual(
     filas = []
     for nombre, valor, metrica_ref, _ in metricas_core:
         if metrica_ref:
-            etiqueta, color = som.clasificar_metrica(metrica_ref, valor, sexo)
+            etiqueta, color = som.clasificar_metrica(metrica_ref, valor, sexo, edad_al_momento)
         else:
             etiqueta, color = ("—", branding.COLOR_TEXT_MUTED)
         filas.append((nombre, _fmt(round(valor, 2) if isinstance(valor, float) else valor), etiqueta, color))
     story.append(_tabla_semaforo(filas))
 
-    if sexo == "Femenino":
+    if edad_al_momento and not (25 <= edad_al_momento <= 65):
         story.append(Spacer(1, 4))
         story.append(Paragraph(
-            "Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético no tienen "
-            "referencia cargada para mujeres todavía; se muestran sin clasificar.",
+            "% Grasa corporal y % músculo esquelético sólo tienen referencia cargada entre 25 y 65 años; "
+            "con esta edad se muestran sin clasificar.",
             styles["Normal"],
         ))
 
@@ -471,13 +471,14 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
 
     for row_idx, (_, fila) in enumerate(df.iterrows(), start=header_row + 1):
         sexo = fila.get("sexo", "Masculino")
+        edad = fila.get("edad")
         for col_idx, (campo, _, metrica_ref) in enumerate(_COLUMNAS_GRUPO, start=1):
             valor = fila.get(campo)
             valor = None if pd.isna(valor) else valor
             cell = ws.cell(row=row_idx, column=col_idx, value=valor)
             cell.alignment = Alignment(horizontal="center")
             if metrica_ref:
-                _, color = som.clasificar_metrica(metrica_ref, valor, sexo)
+                _, color = som.clasificar_metrica(metrica_ref, valor, sexo, edad)
                 if color not in (som.COLOR_SIN_DATO,):
                     cell.fill = PatternFill("solid", fgColor=color.lstrip("#").upper())
 
@@ -489,9 +490,8 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
     ws.cell(
         row=nota_row, column=1,
         value=(
-            "Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético todavía no "
-            "tienen referencia cargada para mujeres; en esas columnas las atletas mujeres quedan sin color "
-            "(ver hoja Referencias)."
+            "% Grasa corporal y % músculo esquelético solo tienen referencia cargada entre 25 y 65 años; "
+            "fuera de ese rango esas columnas quedan sin color (ver hoja Referencias)."
         ),
     ).font = Font(italic=True, size=9)
 
@@ -499,20 +499,11 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
     ws_ref = wb.create_sheet("Referencias")
     ws_ref.cell(row=1, column=1, value="Referencias utilizadas para el semáforo de colores").font = Font(bold=True, size=12)
     fila_actual = 3
-    etiquetas_metricas = {
-        "imc": "IMC (kg/m²)",
-        "grasa_corporal_pct": "% Grasa corporal",
-        "grasa_visceral": "% Grasa visceral",
-        "pliegue_abdominal": "Pliegue abdominal (mm)",
-        "circ_cintura": "Circ. cintura (cm) — solo hombres",
-        "indice_cintura_cadera": "Índice cintura/cadera — solo hombres",
-        "indice_cintura_talla": "Índice cintura/talla — solo hombres",
-        "musculo_esqueletico_pct": "% Músculo esquelético (18-39 años) — solo hombres",
-    }
-    for metrica, titulo in etiquetas_metricas.items():
+
+    def _escribir_reglas(titulo, reglas):
+        nonlocal fila_actual
         ws_ref.cell(row=fila_actual, column=1, value=titulo).font = Font(bold=True)
         fila_actual += 1
-        reglas = som.reglas_referencia(metrica)
         for minimo, maximo, etiqueta, color in reglas:
             if minimo is None:
                 rango = f"< {maximo}"
@@ -524,6 +515,24 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
             c.fill = PatternFill("solid", fgColor=color.lstrip("#").upper())
             fila_actual += 1
         fila_actual += 1
+
+    _escribir_reglas("IMC (kg/m²)", som.reglas_referencia("imc"))
+    _escribir_reglas("% Grasa visceral (nivel OMRON)", som.reglas_referencia("grasa_visceral"))
+    _escribir_reglas("Pliegue abdominal (mm)", som.reglas_referencia("pliegue_abdominal"))
+    _escribir_reglas("Índice cintura/talla", som.reglas_referencia("indice_cintura_talla"))
+    for sexo in ("Femenino", "Masculino"):
+        _escribir_reglas(f"Circ. cintura (cm) — {sexo}", som.reglas_referencia("circ_cintura", sexo))
+        _escribir_reglas(f"Índice cintura/cadera — {sexo}", som.reglas_referencia("indice_cintura_cadera", sexo))
+    for edad_ini, edad_fin in som.BANDAS_EDAD:
+        for sexo in ("Femenino", "Masculino"):
+            _escribir_reglas(
+                f"% Grasa corporal — {sexo}, {edad_ini}-{edad_fin} años",
+                som.reglas_referencia("grasa_corporal_pct", sexo, edad_ini),
+            )
+            _escribir_reglas(
+                f"% Músculo esquelético — {sexo}, {edad_ini}-{edad_fin} años",
+                som.reglas_referencia("musculo_esqueletico_pct", sexo, edad_ini),
+            )
     ws_ref.column_dimensions["A"].width = 45
 
     # --- Hoja de promedios grupales ---
@@ -593,8 +602,8 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
 
     story.append(Paragraph("Detalle por Atleta (última medición)", styles["Seccion"]))
     story.append(Paragraph(
-        "Circ. cintura, índice cintura/cadera, índice cintura/talla y % músculo esquelético todavía no "
-        "tienen referencia cargada para mujeres; en esas columnas las atletas mujeres se muestran sin color.",
+        "% Grasa corporal y % músculo esquelético solo tienen referencia cargada entre 25 y 65 años; "
+        "fuera de ese rango esas columnas se muestran sin color.",
         styles["Normal"],
     ))
     story.append(Spacer(1, 6))
@@ -603,6 +612,7 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
     filas_color = []
     for _, fila in df.iterrows():
         sexo = fila.get("sexo", "Masculino")
+        edad = fila.get("edad")
         fila_valores = []
         fila_colores = []
         for campo, _, metrica_ref in _COLUMNAS_GRUPO:
@@ -610,7 +620,7 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
             valor = None if pd.isna(valor) else valor
             fila_valores.append(_fmt(valor))
             if metrica_ref:
-                _, color = som.clasificar_metrica(metrica_ref, valor, sexo)
+                _, color = som.clasificar_metrica(metrica_ref, valor, sexo, edad)
                 fila_colores.append(None if color == som.COLOR_SIN_DATO else color)
             else:
                 fila_colores.append(None)
