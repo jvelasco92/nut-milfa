@@ -135,6 +135,7 @@ def _v(valores: dict, campo: str, default=0.0):
     return v
 
 
+@st.fragment
 def formulario_medicion(atleta: dict, key_prefix: str, valores: dict = None) -> dict:
     """Renderiza todos los campos de una medición (core + ISAK avanzado),
     calcula los valores derivados en tiempo real y los muestra con semáforo.
