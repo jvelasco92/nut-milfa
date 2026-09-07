@@ -168,9 +168,19 @@ def _fmt(v, suf=""):
     return f"{v}{suf}"
 
 
-def _tabla_semaforo(filas: list[tuple[str, str, str, str]], col_widths=(6.5 * cm, 3 * cm, 3.5 * cm)) -> Table:
-    """filas: (nombre_metrica, valor_texto, etiqueta_clasificación, color_hex)."""
-    data = [["Métrica", "Valor", "Referencia"]] + [[n, v, et] for n, v, et, _ in filas]
+def _tabla_semaforo(filas: list[tuple[str, str, str, str]], col_widths=(6 * cm, 3 * cm, 4.2 * cm)) -> Table:
+    """filas: (nombre_metrica, valor_texto, etiqueta_clasificación, color_hex).
+    La etiqueta se arma como Paragraph para que las referencias más largas
+    (ej. "RIESGO SUST. AUMENTADO") pasen a una segunda línea en vez de cortarse."""
+    data = [["Métrica", "Valor", "Referencia"]]
+    for nombre, valor, etiqueta, color_hex in filas:
+        texto_color = colors.black if color_hex.upper() == som.COLOR_AMARILLO.upper() else colors.white
+        estilo_etiqueta = ParagraphStyle(
+            name="EtiquetaSemaforo", fontName="Helvetica-Bold", fontSize=8.5, leading=10,
+            alignment=1, textColor=texto_color,
+        )
+        data.append([nombre, valor, Paragraph(etiqueta, estilo_etiqueta)])
+
     t = Table(data, colWidths=list(col_widths))
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
@@ -184,13 +194,7 @@ def _tabla_semaforo(filas: list[tuple[str, str, str, str]], col_widths=(6.5 * cm
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]
     for i, (_, _, _, color_hex) in enumerate(filas, start=1):
-        bg = colors.HexColor(color_hex)
-        texto = colors.black if color_hex.upper() == som.COLOR_AMARILLO.upper() else colors.white
-        style += [
-            ("BACKGROUND", (2, i), (2, i), bg),
-            ("TEXTCOLOR", (2, i), (2, i), texto),
-            ("FONTNAME", (2, i), (2, i), "Helvetica-Bold"),
-        ]
+        style.append(("BACKGROUND", (2, i), (2, i), colors.HexColor(color_hex)))
     t.setStyle(TableStyle(style))
     return t
 
@@ -266,6 +270,26 @@ def generar_pdf_ficha_individual(
         story.append(Paragraph(
             "% Grasa corporal y % músculo esquelético sólo tienen referencia cargada entre 25 y 65 años; "
             "con esta edad se muestran sin clasificar.",
+            styles["Normal"],
+        ))
+
+    # --- Conclusión interpretativa automática (matriz grasa+músculo+central+pliegue) ---
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("Conclusión Interpretativa", styles["Seccion"]))
+    conclusion = som.generar_conclusion_interpretativa(medicion, sexo, edad_al_momento)
+    if conclusion:
+        story.append(Paragraph(f"<b>{conclusion['categoria']}.</b> {conclusion['texto']}", styles["Normal"]))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(
+            "Esta conclusión describe el patrón observado a partir de las mediciones cargadas; "
+            "no constituye un diagnóstico clínico.",
+            ParagraphStyle(name="ConclusionNota", parent=styles["Normal"], fontSize=8, textColor=colors.grey),
+        ))
+    else:
+        story.append(Paragraph(
+            "No fue posible generar una conclusión automática: faltan datos de cintura, cadera, índice "
+            "cintura/cadera, índice cintura/talla o pliegue abdominal, o los valores de grasa corporal / "
+            "músculo esquelético están fuera de las franjas etarias con referencia cargada (25-65 años).",
             styles["Normal"],
         ))
 
@@ -518,11 +542,11 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
 
     _escribir_reglas("IMC (kg/m²)", som.reglas_referencia("imc"))
     _escribir_reglas("% Grasa visceral (nivel OMRON)", som.reglas_referencia("grasa_visceral"))
-    _escribir_reglas("Pliegue abdominal (mm)", som.reglas_referencia("pliegue_abdominal"))
     _escribir_reglas("Índice cintura/talla", som.reglas_referencia("indice_cintura_talla"))
     for sexo in ("Femenino", "Masculino"):
         _escribir_reglas(f"Circ. cintura (cm) — {sexo}", som.reglas_referencia("circ_cintura", sexo))
         _escribir_reglas(f"Índice cintura/cadera — {sexo}", som.reglas_referencia("indice_cintura_cadera", sexo))
+        _escribir_reglas(f"Pliegue abdominal (mm) — {sexo}", som.reglas_referencia("pliegue_abdominal", sexo))
     for edad_ini, edad_fin in som.BANDAS_EDAD:
         for sexo in ("Femenino", "Masculino"):
             _escribir_reglas(

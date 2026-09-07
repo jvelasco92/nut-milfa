@@ -180,10 +180,10 @@ def calcular_somatotipo(
 # Semáforo de referencias (colores y umbrales tomados de "inputs/puntos de
 # corte.xlsx"): IMC (OMS 1997/2000); % músculo esquelético y grasa visceral
 # (OMRON HBF-514C); % grasa corporal (Gallagher et al. 2000); circunferencia
-# de cintura e índice cintura/cadera (OMS 2011); índice cintura/talla.
-# % músculo esquelético y % grasa corporal distinguen, además del sexo, la
-# franja etaria (25-39, 40-59, 60-65 años); fuera de esas franjas no hay
-# referencia cargada y se muestran sin clasificar.
+# de cintura, índice cintura/cadera (OMS 2011) y pliegue abdominal, por sexo;
+# índice cintura/talla, unisex. % músculo esquelético y % grasa corporal
+# distinguen, además del sexo, la franja etaria (25-39, 40-59, 60-65 años);
+# fuera de esas franjas no hay referencia cargada y se muestran sin clasificar.
 # ---------------------------------------------------------------------------
 COLOR_VERDE = "#2e7d32"
 COLOR_AMARILLO = "#f2c400"
@@ -210,10 +210,6 @@ _REFERENCIAS_UNISEX = {
         (None, 10, "NORMAL", COLOR_VERDE),
         (10, 15, "ALTO", COLOR_NARANJA),
         (15, None, "MUY ALTO", COLOR_ROJO),
-    ],
-    "pliegue_abdominal": [
-        (None, 12, "FAVORABLE", COLOR_VERDE),
-        (12, None, "ELEVADO", COLOR_ROJO),
     ],
     "indice_cintura_talla": [
         (None, 0.50, "SIN RIESGO", COLOR_VERDE),
@@ -243,6 +239,16 @@ _REFERENCIAS_SEXO = {
         "Masculino": [
             (None, 0.90, "BAJO RIESGO", COLOR_VERDE),
             (0.90, None, "RIESGO AUMENTADO", COLOR_ROJO),
+        ],
+    },
+    "pliegue_abdominal": {
+        "Masculino": [
+            (None, 20, "ESPERADO", COLOR_VERDE),
+            (20, None, "ELEVADO", COLOR_ROJO),
+        ],
+        "Femenino": [
+            (None, 25, "ESPERADO", COLOR_VERDE),
+            (25, None, "ELEVADO", COLOR_ROJO),
         ],
     },
 }
@@ -389,6 +395,172 @@ def clasificar_metrica(metrica: str, valor: float, sexo: str = "Masculino", edad
 
     ultimo = reglas[-1]
     return ultimo[2], ultimo[3]
+
+
+# ---------------------------------------------------------------------------
+# Matriz de interpretación automática (a partir de "inputs/Matriz de
+# Interpretación (1).pdf"). Combina 4 indicadores del perfil antropométrico:
+#   - grasa: % grasa corporal            -> VERDE (normal) / ROJO (alto o muy alto)
+#   - musculo: % músculo esquelético     -> VERDE (normal) / AZUL (alto o muy alto) / ROJO (bajo)
+#   - central: circ. cintura + índice cintura/cadera + índice cintura/talla,
+#     combinados -> VERDE (ninguno elevado) / ROJO (todos elevados) /
+#     AMARILLO (discordantes entre sí)
+#   - pliegue: pliegue abdominal (por sexo) -> VERDE (esperado) / ROJO (elevado)
+# Cuando "central" y "pliegue" se contradicen (uno elevado y el otro no), se
+# usa una interpretación fija que señala la discordancia, sin importar grasa
+# ni músculo (así lo pidió la nutricionista explícitamente). El resto de las
+# combinaciones usa el texto específico de la matriz. Nunca emite diagnósticos
+# (no dice "obesidad", "riesgo cardiovascular", "sarcopenia", etc.): solo
+# describe el patrón observado y señala concordancias o discordancias.
+# ---------------------------------------------------------------------------
+def _estado_grasa(valor, sexo, edad):
+    etiqueta, _ = clasificar_metrica("grasa_corporal_pct", valor, sexo, edad)
+    if etiqueta == "NORMAL":
+        return "VERDE"
+    if etiqueta in ("ALTO", "MUY ALTO"):
+        return "ROJO"
+    return None  # BAJO, o sin dato/referencia: la matriz no lo contempla
+
+
+def _estado_musculo(valor, sexo, edad):
+    etiqueta, _ = clasificar_metrica("musculo_esqueletico_pct", valor, sexo, edad)
+    if etiqueta == "NORMAL":
+        return "VERDE"
+    if etiqueta in ("ALTO", "MUY ALTO"):
+        return "AZUL"
+    if etiqueta == "BAJO":
+        return "ROJO"
+    return None
+
+
+def _estado_pliegue(valor, sexo):
+    etiqueta, _ = clasificar_metrica("pliegue_abdominal", valor, sexo)
+    if etiqueta == "ESPERADO":
+        return "VERDE"
+    if etiqueta == "ELEVADO":
+        return "ROJO"
+    return None
+
+
+def _estado_central(cintura, indice_cc, indice_ct, sexo):
+    """Combina circ. cintura + índice cintura/cadera + índice cintura/talla:
+    VERDE si ninguno está elevado, ROJO si todos lo están, AMARILLO si son
+    discordantes entre sí. None si no hay ninguno de los tres disponible."""
+    banderas = []
+    etiqueta, _ = clasificar_metrica("circ_cintura", cintura, sexo)
+    if etiqueta in ("RIESGO NORMAL", "RIESGO AUMENTADO", "RIESGO SUST. AUMENTADO"):
+        banderas.append(etiqueta != "RIESGO NORMAL")
+    etiqueta, _ = clasificar_metrica("indice_cintura_cadera", indice_cc, sexo)
+    if etiqueta in ("BAJO RIESGO", "RIESGO AUMENTADO"):
+        banderas.append(etiqueta == "RIESGO AUMENTADO")
+    etiqueta, _ = clasificar_metrica("indice_cintura_talla", indice_ct, sexo)
+    if etiqueta in ("SIN RIESGO", "RIESGO AUMENTADO"):
+        banderas.append(etiqueta == "RIESGO AUMENTADO")
+
+    if not banderas:
+        return None
+    if all(banderas):
+        return "ROJO"
+    if not any(banderas):
+        return "VERDE"
+    return "AMARILLO"
+
+
+# Casos donde "central" y "pliegue" se contradicen: interpretación fija,
+# independiente de grasa/músculo (pedido explícito de la nutricionista).
+_CONCLUSION_DISCORDANCIAS = {
+    ("VERDE", "ROJO"): (
+        "Discordancia entre adiposidad central y pliegue abdominal",
+        "Los indicadores de adiposidad central se encuentran dentro del rango de referencia; sin embargo, "
+        "se observa un pliegue abdominal elevado, compatible con una mayor adiposidad subcutánea abdominal.",
+    ),
+    ("ROJO", "VERDE"): (
+        "Discordancia entre adiposidad central y pliegue abdominal",
+        "Se observan indicadores aumentados de adiposidad central, mientras que el pliegue abdominal se "
+        "encuentra dentro del rango esperado. Se recomienda considerar conjuntamente los distintos "
+        "indicadores de distribución adiposa.",
+    ),
+}
+
+# Para el resto de las combinaciones de (central, pliegue): texto según (grasa, músculo).
+_CONCLUSION_MATRIZ = {
+    ("VERDE", "VERDE"): (
+        "Perfil favorable",
+        {
+            ("VERDE", "VERDE"): "Los indicadores evaluados muestran un perfil antropométrico favorable, con un porcentaje de grasa corporal y un nivel de masa muscular dentro de los rangos de referencia, sin indicadores aumentados de adiposidad central y con un pliegue abdominal esperado.",
+            ("VERDE", "AZUL"): "Se observa un perfil antropométrico favorable, con un porcentaje de grasa corporal dentro del rango de referencia y un nivel de masa muscular elevado, sin indicadores aumentados de adiposidad central y con un pliegue abdominal esperado.",
+            ("VERDE", "ROJO"): "El porcentaje de grasa corporal y los indicadores de adiposidad abdominal se encuentran dentro de los rangos de referencia, mientras que el nivel de masa muscular se encuentra por debajo del rango esperado.",
+            ("ROJO", "VERDE"): "Se observa un porcentaje de grasa corporal elevado, mientras que el nivel de masa muscular se encuentra dentro del rango de referencia y no se observan indicadores aumentados de adiposidad central o abdominal.",
+            ("ROJO", "AZUL"): "Se observa un porcentaje de grasa corporal elevado acompañado de un nivel de masa muscular elevado, sin indicadores aumentados de adiposidad central o abdominal.",
+            ("ROJO", "ROJO"): "Se observa un porcentaje de grasa corporal elevado acompañado de un nivel de masa muscular inferior al rango de referencia, sin indicadores aumentados de adiposidad central o abdominal.",
+        },
+    ),
+    ("ROJO", "ROJO"): (
+        "Adiposidad central aumentada y pliegue abdominal elevado",
+        {
+            ("VERDE", "VERDE"): "Se observa una composición corporal dentro de los rangos de referencia, acompañada de indicadores aumentados de adiposidad central y un pliegue abdominal elevado.",
+            ("VERDE", "AZUL"): "Se observa un porcentaje de grasa corporal dentro del rango de referencia y un nivel de masa muscular elevado, acompañados de indicadores aumentados de adiposidad central y un pliegue abdominal elevado.",
+            ("VERDE", "ROJO"): "Se observa un nivel de masa muscular inferior al rango de referencia acompañado de indicadores aumentados de adiposidad central y un pliegue abdominal elevado, pese a presentar un porcentaje de grasa corporal dentro del rango de referencia.",
+            ("ROJO", "VERDE"): "Se observa un porcentaje de grasa corporal elevado acompañado de indicadores aumentados de adiposidad central y un pliegue abdominal elevado, mientras que el nivel de masa muscular se encuentra dentro del rango de referencia.",
+            ("ROJO", "AZUL"): "Se observa un porcentaje de grasa corporal elevado y un nivel de masa muscular elevado, acompañados de indicadores aumentados de adiposidad central y un pliegue abdominal elevado.",
+            ("ROJO", "ROJO"): "Se observa un patrón de mayor adiposidad corporal y abdominal, acompañado de un nivel de masa muscular inferior al rango de referencia.",
+        },
+    ),
+    ("AMARILLO", "VERDE"): (
+        "Adiposidad central discordante, pliegue abdominal esperado",
+        {
+            ("VERDE", "VERDE"): "Los indicadores de adiposidad central presentan resultados discordantes. El porcentaje de grasa corporal y el nivel de masa muscular se encuentran dentro de los rangos de referencia, mientras que el pliegue abdominal se encuentra dentro del rango esperado.",
+            ("VERDE", "AZUL"): "Los indicadores de adiposidad central presentan resultados discordantes. Se observa un porcentaje de grasa corporal dentro del rango de referencia y un nivel de masa muscular elevado, con un pliegue abdominal dentro del rango esperado.",
+            ("VERDE", "ROJO"): "Los indicadores de adiposidad central presentan resultados discordantes. El porcentaje de grasa corporal y el pliegue abdominal se encuentran dentro de los rangos de referencia, mientras que el nivel de masa muscular se encuentra por debajo del rango esperado.",
+            ("ROJO", "VERDE"): "Los indicadores de adiposidad central presentan resultados discordantes. Se observa un porcentaje de grasa corporal elevado, mientras que el nivel de masa muscular y el pliegue abdominal se encuentran dentro de los rangos de referencia.",
+            ("ROJO", "AZUL"): "Los indicadores de adiposidad central presentan resultados discordantes. Se observa un porcentaje de grasa corporal y un nivel de masa muscular elevados, con un pliegue abdominal dentro del rango esperado.",
+            ("ROJO", "ROJO"): "Los indicadores de adiposidad central presentan resultados discordantes. Se observa un porcentaje de grasa corporal elevado y un nivel de masa muscular inferior al rango de referencia, mientras que el pliegue abdominal se encuentra dentro del rango esperado.",
+        },
+    ),
+    ("AMARILLO", "ROJO"): (
+        "Adiposidad central discordante, pliegue abdominal elevado",
+        {
+            ("VERDE", "VERDE"): "Los indicadores de adiposidad central presentan resultados discordantes. Si bien algunos indicadores se encuentran dentro del rango de referencia, se observa un pliegue abdominal elevado, compatible con una mayor adiposidad subcutánea abdominal.",
+            ("VERDE", "AZUL"): "Los indicadores de adiposidad central presentan resultados discordantes. Se observa un porcentaje de grasa corporal dentro del rango de referencia y un nivel de masa muscular elevado, acompañado de un pliegue abdominal elevado.",
+            ("VERDE", "ROJO"): "Los indicadores de adiposidad central presentan resultados discordantes. Se observa un nivel de masa muscular inferior al rango de referencia y un pliegue abdominal elevado, pese a presentar un porcentaje de grasa corporal dentro del rango de referencia.",
+            ("ROJO", "VERDE"): "Los indicadores de adiposidad central presentan resultados discordantes. Se observa un porcentaje de grasa corporal y un pliegue abdominal elevados, mientras que el nivel de masa muscular se encuentra dentro del rango de referencia.",
+            ("ROJO", "AZUL"): "Los indicadores de adiposidad central presentan resultados discordantes. Se observa un porcentaje de grasa corporal y un pliegue abdominal elevados, acompañados de un nivel de masa muscular elevado.",
+            ("ROJO", "ROJO"): "Los indicadores de adiposidad central presentan resultados discordantes. Se observa un porcentaje de grasa corporal y un pliegue abdominal elevados, acompañados de un nivel de masa muscular inferior al rango de referencia.",
+        },
+    ),
+}
+
+
+def generar_conclusion_interpretativa(medicion: dict, sexo: str, edad: int = None) -> dict | None:
+    """Aplica la matriz de interpretación y devuelve {'categoria', 'texto'}, o
+    None si no hay datos suficientes (faltan cintura/cadera/ICC/ICT/pliegue, o
+    grasa/músculo están fuera de las franjas etarias con referencia)."""
+    pliegue_estado = _estado_pliegue(medicion.get("pliegue_abdominal"), sexo)
+    central_estado = _estado_central(
+        medicion.get("cintura"), medicion.get("indice_cintura_cadera"), medicion.get("indice_cintura_talla"), sexo,
+    )
+    if pliegue_estado is None or central_estado is None:
+        return None
+
+    discordancia = _CONCLUSION_DISCORDANCIAS.get((central_estado, pliegue_estado))
+    if discordancia:
+        categoria, texto = discordancia
+        return {"categoria": categoria, "texto": texto}
+
+    entrada = _CONCLUSION_MATRIZ.get((central_estado, pliegue_estado))
+    if not entrada:
+        return None
+    categoria, tabla = entrada
+
+    grasa_estado = _estado_grasa(medicion.get("bio_grasa_corporal"), sexo, edad)
+    musculo_estado = _estado_musculo(medicion.get("pct_musculo_esqueletico"), sexo, edad)
+    if grasa_estado is None or musculo_estado is None:
+        return None
+
+    texto = tabla.get((grasa_estado, musculo_estado))
+    if not texto:
+        return None
+    return {"categoria": categoria, "texto": texto}
 
 
 # ---------------------------------------------------------------------------
