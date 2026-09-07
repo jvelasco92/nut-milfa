@@ -275,7 +275,7 @@ def generar_pdf_ficha_individual(
 
     # --- Conclusión interpretativa automática (matriz grasa+músculo+central+pliegue) ---
     story.append(Spacer(1, 6))
-    story.append(Paragraph("Conclusión Interpretativa", styles["Seccion"]))
+    story.append(Paragraph("Conclusiones", styles["Seccion"]))
     conclusion = som.generar_conclusion_interpretativa(medicion, sexo, edad_al_momento)
     if conclusion:
         story.append(Paragraph(f"<b>{conclusion['categoria']}.</b> {conclusion['texto']}", styles["Normal"]))
