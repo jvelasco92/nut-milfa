@@ -265,7 +265,7 @@ def generar_pdf_ficha_individual(
         ("Email", _fmt(atleta.get("email"))),
         ("Fecha de medición", _fmt(medicion.get("fecha_medicion"))),
         ("Fecha y hora de carga", _fmt(medicion.get("fecha_hora_carga"))),
-        ("Cargado por", _fmt(medicion.get("cargado_por"))),
+        # ("Cargado por", _fmt(medicion.get("cargado_por"))),
     ]))
 
     # --- Datos principales con semáforo de referencia (siempre se muestran) ---
