@@ -435,10 +435,12 @@ def pagina_perfil_atleta():
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
+        # mesomorfia requiere diámetros + perímetros ISAK completos; sin eso, endo/ecto
+        # igual devuelven un valor por defecto que no representa un somatotipo real.
         puntos = [
             {"x": r["coord_x"], "y": r["coord_y"], "fecha": str(r["fecha_medicion"]),
              "endomorfia": r["endomorfia"], "mesomorfia": r["mesomorfia"], "ectomorfia": r["ectomorfia"]}
-            for _, r in df_hist.iterrows() if pd.notna(r["coord_x"])
+            for _, r in df_hist.iterrows() if pd.notna(r["coord_x"]) and r.get("mesomorfia")
         ]
         fig = som.crear_grafico_somatocarta(puntos, titulo=f"Somatocarta - {atleta['nombre']} {atleta['apellido']}")
         st.plotly_chart(fig, use_container_width=True)
@@ -558,7 +560,7 @@ def pagina_exportar():
                 c6.metric("Índice cintura/cadera promedio", _r(stats["icc_prom"]))
                 c7.metric("Índice cintura/talla promedio", _r(stats["ict_prom"]))
 
-                if pd.notna(stats.get("endomorfia_prom")):
+                if stats.get("mesomorfia_prom"):
                     st.caption("Promedios ISAK (solo atletas con somatotipo cargado)")
                     d1, d2, d3 = st.columns(3)
                     d1.metric("Endomorfia grupal", _r(stats["endomorfia_prom"]))
@@ -598,17 +600,23 @@ def pagina_exportar():
                 st.subheader("Fichas individuales del grupo")
                 st.caption(
                     "Genera la ficha PDF individual (última medición) de cada atleta del grupo "
-                    "y las junta en un único archivo ZIP para descargar de una sola vez."
+                    "y las junta en un único archivo ZIP para descargar de una sola vez. Con grupos "
+                    "grandes puede tardar unos segundos: se arma solo al tocar \"Generar\"."
                 )
                 incluir_somatocarta_zip = st.checkbox(
                     "Incluir gráfico de somatocarta en las fichas", value=True, key="chk_somato_zip_grupo",
                 )
-                zip_bytes = _generar_zip_fichas_grupo(grupo_id, incluir_somatocarta_zip)
-                st.download_button(
-                    "📦 Descargar fichas individuales (ZIP)", data=zip_bytes,
-                    file_name=f"fichas_{grupo_nombre}.zip",
-                    mime="application/zip", use_container_width=True,
-                )
+                if st.button("📦 Generar ZIP de fichas individuales", use_container_width=True):
+                    with st.spinner(f"Generando fichas de {grupo_nombre}..."):
+                        st.session_state["zip_fichas_grupo"] = _generar_zip_fichas_grupo(grupo_id, incluir_somatocarta_zip)
+                        st.session_state["zip_fichas_grupo_id"] = grupo_id
+
+                if st.session_state.get("zip_fichas_grupo_id") == grupo_id:
+                    st.download_button(
+                        "⬇️ Descargar ZIP de fichas", data=st.session_state["zip_fichas_grupo"],
+                        file_name=f"fichas_{grupo_nombre}.zip",
+                        mime="application/zip", use_container_width=True,
+                    )
 
     # --- Backup completo ---
     with tab4:

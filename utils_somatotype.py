@@ -221,12 +221,12 @@ _REFERENCIAS_UNISEX = {
 _REFERENCIAS_SEXO = {
     "circ_cintura": {
         "Femenino": [
-            (None, 80, "RIESGO NORMAL", COLOR_VERDE),
+            (None, 80, "NORMAL", COLOR_VERDE),
             (80, 88, "RIESGO AUMENTADO", COLOR_AMARILLO),
             (88, None, "RIESGO SUST. AUMENTADO", COLOR_ROJO),
         ],
         "Masculino": [
-            (None, 94, "RIESGO NORMAL", COLOR_VERDE),
+            (None, 94, "NORMAL", COLOR_VERDE),
             (94, 102, "RIESGO AUMENTADO", COLOR_AMARILLO),
             (102, None, "RIESGO SUST. AUMENTADO", COLOR_ROJO),
         ],
@@ -448,8 +448,8 @@ def _estado_central(cintura, indice_cc, indice_ct, sexo):
     discordantes entre sí. None si no hay ninguno de los tres disponible."""
     banderas = []
     etiqueta, _ = clasificar_metrica("circ_cintura", cintura, sexo)
-    if etiqueta in ("RIESGO NORMAL", "RIESGO AUMENTADO", "RIESGO SUST. AUMENTADO"):
-        banderas.append(etiqueta != "RIESGO NORMAL")
+    if etiqueta in ("NORMAL", "RIESGO AUMENTADO", "RIESGO SUST. AUMENTADO"):
+        banderas.append(etiqueta != "NORMAL")
     etiqueta, _ = clasificar_metrica("indice_cintura_cadera", indice_cc, sexo)
     if etiqueta in ("BAJO RIESGO", "RIESGO AUMENTADO"):
         banderas.append(etiqueta == "RIESGO AUMENTADO")

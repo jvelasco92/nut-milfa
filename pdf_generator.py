@@ -273,26 +273,6 @@ def generar_pdf_ficha_individual(
             styles["Normal"],
         ))
 
-    # --- Conclusión interpretativa automática (matriz grasa+músculo+central+pliegue) ---
-    story.append(Spacer(1, 6))
-    story.append(Paragraph("Conclusiones", styles["Seccion"]))
-    conclusion = som.generar_conclusion_interpretativa(medicion, sexo, edad_al_momento)
-    if conclusion:
-        story.append(Paragraph(f"<b>{conclusion['categoria']}.</b> {conclusion['texto']}", styles["Normal"]))
-        story.append(Spacer(1, 4))
-        story.append(Paragraph(
-            "Esta conclusión describe el patrón observado a partir de las mediciones cargadas; "
-            "no constituye un diagnóstico clínico.",
-            ParagraphStyle(name="ConclusionNota", parent=styles["Normal"], fontSize=8, textColor=colors.grey),
-        ))
-    else:
-        story.append(Paragraph(
-            "No fue posible generar una conclusión automática: faltan datos de cintura, cadera, índice "
-            "cintura/cadera, índice cintura/talla o pliegue abdominal, o los valores de grasa corporal / "
-            "músculo esquelético están fuera de las franjas etarias con referencia cargada (25-65 años).",
-            styles["Normal"],
-        ))
-
     # --- Comparación con la medición anterior ---
     if medicion_anterior:
         story.append(Paragraph("Comparación con Medición Anterior", styles["Seccion"]))
@@ -343,7 +323,10 @@ def generar_pdf_ficha_individual(
             ("% Músculo (Martin, por perímetros)", _fmt(medicion.get("porcentaje_musculo"), " %")),
         ]))
 
-    hay_somatotipo = any([medicion.get("endomorfia"), medicion.get("mesomorfia"), medicion.get("ectomorfia")])
+    # mesomorfia requiere diámetros óseos + perímetros ISAK completos; a diferencia
+    # de endo/ectomorfia (que sin esos datos igual devuelven un valor por defecto),
+    # es la única señal confiable de que el ISAK avanzado se completó.
+    hay_somatotipo = bool(medicion.get("mesomorfia"))
     if hay_somatotipo:
         story.append(Paragraph("Somatotipo (Heath-Carter)", styles["Seccion"]))
         story.append(_tabla_datos([
@@ -374,6 +357,26 @@ def generar_pdf_ficha_individual(
     story.append(Paragraph("Observación", styles["Seccion"]))
     obs = medicion.get("observaciones") or "Sin observaciones registradas."
     story.append(Paragraph(obs, styles["Normal"]))
+
+    # --- Conclusiones: matriz de interpretación automática (grasa+músculo+central+pliegue) ---
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("Conclusiones", styles["Seccion"]))
+    conclusion = som.generar_conclusion_interpretativa(medicion, sexo, edad_al_momento)
+    if conclusion:
+        story.append(Paragraph(f"<b>{conclusion['categoria']}.</b> {conclusion['texto']}", styles["Normal"]))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(
+            "Esta conclusión describe el patrón observado a partir de las mediciones cargadas; "
+            "no constituye un diagnóstico clínico.",
+            ParagraphStyle(name="ConclusionNota", parent=styles["Normal"], fontSize=8, textColor=colors.grey),
+        ))
+    else:
+        story.append(Paragraph(
+            "No fue posible generar una conclusión automática: faltan datos de cintura, cadera, índice "
+            "cintura/cadera, índice cintura/talla o pliegue abdominal, o los valores de grasa corporal / "
+            "músculo esquelético están fuera de las franjas etarias con referencia cargada (25-65 años).",
+            styles["Normal"],
+        ))
 
     doc.build(story, onFirstPage=_dibujar_encabezado, onLaterPages=_dibujar_encabezado)
     buffer.seek(0)
@@ -419,7 +422,9 @@ def generar_pdf_historial(atleta: dict, df_historial: pd.DataFrame, incluir_soma
         story.append(Paragraph("Evolución Temporal", styles["Seccion"]))
         story.append(Image(_grafico_evolucion_png(df_historial), width=15 * cm, height=8 * cm))
 
-    puntos = list(zip(df_historial["coord_x"].dropna(), df_historial["coord_y"].dropna()))
+    # Solo mediciones con ISAK completo (mesomorfia != 0) tienen un somatotipo real.
+    df_isak = df_historial[df_historial["mesomorfia"].fillna(0) != 0]
+    puntos = list(zip(df_isak["coord_x"].dropna(), df_isak["coord_y"].dropna()))
     if incluir_somatocarta and puntos:
         story.append(Paragraph("Somatocarta - Evolución", styles["Seccion"]))
         story.append(Image(_grafico_somatocarta_png(puntos), width=11 * cm, height=8.8 * cm))
