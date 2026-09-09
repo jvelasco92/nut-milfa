@@ -564,6 +564,102 @@ def generar_conclusion_interpretativa(medicion: dict, sexo: str, edad: int = Non
 
 
 # ---------------------------------------------------------------------------
+# Clasificación grupal de necesidad de acompañamiento nutricional. Usa % grasa
+# corporal, % músculo esquelético, adiposidad central (cintura + ICC + ICT) y
+# pliegue abdominal. El músculo bajo, el pliegue elevado y la grasa alta NO
+# generan ROJO por sí solos (evita sobre-sensibilidad): ROJO requiere
+# adiposidad central aumentada, o grasa MUY ALTO combinada con otra alteración.
+# ---------------------------------------------------------------------------
+ETIQUETA_VERDE_SEGUIMIENTO = "No necesita acompañamiento"
+ETIQUETA_AMARILLO_SEGUIMIENTO = "No requiere acompañamiento prioritario"
+ETIQUETA_ROJO_SEGUIMIENTO = "Requiere Acompañamiento"
+ETIQUETA_SIN_DATOS_SEGUIMIENTO = "Sin datos suficientes"
+
+
+def clasificar_seguimiento_nutricional(medicion: dict, sexo: str, edad: int = None) -> tuple[str, str]:
+    """Devuelve (etiqueta, color_hex) de necesidad de acompañamiento
+    nutricional, o (ETIQUETA_SIN_DATOS_SEGUIMIENTO, gris) si falta algún
+    indicador o está fuera de las franjas etarias con referencia cargada."""
+    grasa, _ = clasificar_metrica("grasa_corporal_pct", medicion.get("bio_grasa_corporal"), sexo, edad)
+    if grasa not in ("BAJO", "NORMAL", "ALTO", "MUY ALTO"):
+        return ETIQUETA_SIN_DATOS_SEGUIMIENTO, COLOR_SIN_DATO
+
+    musculo_estado = _estado_musculo(medicion.get("pct_musculo_esqueletico"), sexo, edad)
+    central_estado = _estado_central(
+        medicion.get("cintura"), medicion.get("indice_cintura_cadera"), medicion.get("indice_cintura_talla"), sexo,
+    )
+    pliegue_estado = _estado_pliegue(medicion.get("pliegue_abdominal"), sexo)
+    if musculo_estado is None or central_estado is None or pliegue_estado is None:
+        return ETIQUETA_SIN_DATOS_SEGUIMIENTO, COLOR_SIN_DATO
+
+    musculo_bajo = musculo_estado == "ROJO"
+    pliegue_elevado = pliegue_estado == "ROJO"
+
+    # --- ROJO: acompañamiento nutricional prioritario ---
+    if central_estado == "ROJO":
+        return ETIQUETA_ROJO_SEGUIMIENTO, COLOR_ROJO
+    if grasa == "MUY ALTO" and (musculo_bajo or pliegue_elevado or central_estado == "AMARILLO"):
+        return ETIQUETA_ROJO_SEGUIMIENTO, COLOR_ROJO
+
+    # --- VERDE: perfil favorable ---
+    if grasa == "NORMAL" and not musculo_bajo and central_estado == "VERDE" and not pliegue_elevado:
+        return ETIQUETA_VERDE_SEGUIMIENTO, COLOR_VERDE
+
+    # --- AMARILLO: alteración aislada, sin criterios de prioridad ---
+    return ETIQUETA_AMARILLO_SEGUIMIENTO, COLOR_AMARILLO
+
+
+def calcular_distribuciones_grupo(df_detalle) -> dict[str, list[tuple[str, int, str]]]:
+    """Cuenta, sobre la última medición de cada atleta del grupo, cuántos caen
+    en cada categoría de 5 indicadores. Devuelve {titulo: [(etiqueta, cantidad,
+    color_hex), ...]}, solo con categorías que tienen al menos un atleta."""
+
+    def _contar_metrica(campo, metrica, con_edad, validas):
+        conteo = {v: 0 for v in validas}
+        conteo["Sin dato"] = 0
+        color_de = {}
+        for _, fila in df_detalle.iterrows():
+            sexo = fila.get("sexo", "Masculino")
+            edad = fila.get("edad") if con_edad else None
+            etiqueta, color = clasificar_metrica(metrica, fila.get(campo), sexo, edad)
+            if etiqueta not in validas:
+                etiqueta, color = "Sin dato", COLOR_SIN_DATO
+            conteo[etiqueta] += 1
+            color_de[etiqueta] = color
+        return [(et, n, color_de.get(et, COLOR_SIN_DATO)) for et, n in conteo.items() if n > 0]
+
+    conteo_seg = {
+        ETIQUETA_VERDE_SEGUIMIENTO: 0, ETIQUETA_AMARILLO_SEGUIMIENTO: 0,
+        ETIQUETA_ROJO_SEGUIMIENTO: 0, ETIQUETA_SIN_DATOS_SEGUIMIENTO: 0,
+    }
+    color_seg = {
+        ETIQUETA_VERDE_SEGUIMIENTO: COLOR_VERDE, ETIQUETA_AMARILLO_SEGUIMIENTO: COLOR_AMARILLO,
+        ETIQUETA_ROJO_SEGUIMIENTO: COLOR_ROJO, ETIQUETA_SIN_DATOS_SEGUIMIENTO: COLOR_SIN_DATO,
+    }
+    for _, fila in df_detalle.iterrows():
+        sexo = fila.get("sexo", "Masculino")
+        edad = fila.get("edad")
+        etiqueta, _ = clasificar_seguimiento_nutricional(fila.to_dict(), sexo, edad)
+        conteo_seg[etiqueta] += 1
+
+    return {
+        "Seguimiento nutricional": [(et, n, color_seg[et]) for et, n in conteo_seg.items() if n > 0],
+        "Masa muscular": _contar_metrica(
+            "pct_musculo_esqueletico", "musculo_esqueletico_pct", True, ("BAJO", "NORMAL", "ALTO", "MUY ALTO"),
+        ),
+        "Masa grasa": _contar_metrica(
+            "bio_grasa_corporal", "grasa_corporal_pct", True, ("BAJO", "NORMAL", "ALTO", "MUY ALTO"),
+        ),
+        "Pliegue abdominal": _contar_metrica(
+            "pliegue_abdominal", "pliegue_abdominal", False, ("ESPERADO", "ELEVADO"),
+        ),
+        "Índice cintura/cadera": _contar_metrica(
+            "indice_cintura_cadera", "indice_cintura_cadera", False, ("BAJO RIESGO", "RIESGO AUMENTADO"),
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Somatocarta (gráfico interactivo Plotly)
 # ---------------------------------------------------------------------------
 def crear_grafico_somatocarta(puntos: list[dict], titulo: str = "Somatocarta") -> go.Figure:

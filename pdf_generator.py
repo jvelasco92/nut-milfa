@@ -10,8 +10,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.units import pixels_to_EMU
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -126,6 +130,29 @@ def _grafico_evolucion_png(df: pd.DataFrame) -> io.BytesIO:
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _grafico_torta_png(datos: list[tuple[str, int, str]], titulo: str) -> io.BytesIO:
+    """datos: [(etiqueta, cantidad, color_hex), ...]."""
+    fig, ax = plt.subplots(figsize=(4.2, 3.6))
+    total = sum(n for _, n, _ in datos)
+    if not datos or total == 0:
+        ax.text(0.5, 0.5, "Sin datos", ha="center", va="center", fontsize=10)
+        ax.axis("off")
+    else:
+        etiquetas = [f"{et}\n{n} ({n / total * 100:.0f}%)" for et, n, _ in datos]
+        valores = [n for _, n, _ in datos]
+        colores_pie = [c for _, _, c in datos]
+        ax.pie(valores, labels=etiquetas, colors=colores_pie, startangle=90, textprops={"fontsize": 7.5})
+        ax.axis("equal")
+    ax.set_title(titulo, fontsize=10, fontweight="bold", pad=18)
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -484,7 +511,7 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
     font_titulo = Font(bold=True, color="FFFFFF", size=13)
     font_header = Font(bold=True, size=10)
 
-    n_cols = len(_COLUMNAS_GRUPO)
+    n_cols = len(_COLUMNAS_GRUPO) + 1  # + Seguimiento Nutricional
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n_cols)
     ws.cell(row=1, column=1, value=f"CONTROL DE COMPOSICIÓN CORPORAL — {nombre_grupo}").font = font_titulo
     ws.cell(row=1, column=1).fill = fill_titulo
@@ -492,11 +519,16 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
     ws.cell(row=2, column=1, value=branding.NUTRICIONISTAS).font = Font(italic=True, size=10)
 
     header_row = 4
+    ws.row_dimensions[header_row].height = 30
     for col_idx, (_, titulo, _) in enumerate(_COLUMNAS_GRUPO, start=1):
         c = ws.cell(row=header_row, column=col_idx, value=titulo)
         c.font = font_header
         c.fill = fill_header
         c.alignment = Alignment(horizontal="center", wrap_text=True)
+    c = ws.cell(row=header_row, column=n_cols, value="Seguimiento Nutricional")
+    c.font = font_header
+    c.fill = fill_header
+    c.alignment = Alignment(horizontal="center", wrap_text=True)
 
     for row_idx, (_, fila) in enumerate(df.iterrows(), start=header_row + 1):
         sexo = fila.get("sexo", "Masculino")
@@ -511,8 +543,16 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
                 if color not in (som.COLOR_SIN_DATO,):
                     cell.fill = PatternFill("solid", fgColor=color.lstrip("#").upper())
 
-    for col_idx in range(1, n_cols + 1):
+        etiqueta_seg, color_seg = som.clasificar_seguimiento_nutricional(fila.to_dict(), sexo, edad)
+        cell = ws.cell(row=row_idx, column=n_cols, value=etiqueta_seg)
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+        cell.font = Font(bold=True)
+        if color_seg != som.COLOR_SIN_DATO:
+            cell.fill = PatternFill("solid", fgColor=color_seg.lstrip("#").upper())
+
+    for col_idx in range(1, n_cols):
         ws.column_dimensions[get_column_letter(col_idx)].width = 16
+    ws.column_dimensions[get_column_letter(n_cols)].width = 26
 
     nota_row = header_row + len(df) + 2
     ws.merge_cells(start_row=nota_row, start_column=1, end_row=nota_row, end_column=n_cols)
@@ -590,6 +630,22 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
     ws_prom.column_dimensions["A"].width = 38
     ws_prom.column_dimensions["B"].width = 14
 
+    # --- Hoja de estadística de grupo (gráficos de torta) ---
+    ws_stats = wb.create_sheet("Estadística")
+    ws_stats.cell(row=1, column=1, value=f"Estadística de Grupo — {nombre_grupo}").font = Font(bold=True, size=13)
+    ANCHO_IMG, ALTO_IMG = 380, 300  # px
+    fila_img, col_img = 2, 0
+    for i, (titulo, datos) in enumerate(som.calcular_distribuciones_grupo(df).items()):
+        img = XLImage(_grafico_torta_png(datos, titulo))
+        marcador = AnchorMarker(col=col_img, colOff=0, row=fila_img, rowOff=0)
+        img.anchor = OneCellAnchor(_from=marcador, ext=XDRPositiveSize2D(pixels_to_EMU(ANCHO_IMG), pixels_to_EMU(ALTO_IMG)))
+        ws_stats.add_image(img)
+        if (i + 1) % 2 == 0:
+            col_img = 0
+            fila_img += 17
+        else:
+            col_img += 9
+
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -599,7 +655,19 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
 # ---------------------------------------------------------------------------
 # PDF: Estadística de grupo
 # ---------------------------------------------------------------------------
-_ANCHOS_COLUMNAS_GRUPO_PDF = [2.3, 2.3, 2.1, 1.5, 1.3, 1.5, 1.9, 1.7, 1.7, 1.8, 1.6, 1.9, 1.7, 1.7]  # cm
+_ANCHOS_COLUMNAS_GRUPO_PDF = [2.1, 2.1, 1.9, 1.4, 1.3, 1.5, 1.9, 1.7, 1.7, 1.8, 1.6, 1.9, 1.7, 1.7, 2.8]  # cm
+
+_ESTILO_HEADER_GRUPO = ParagraphStyle(
+    name="HeaderGrupo", fontName="Helvetica-Bold", fontSize=7, leading=8.5,
+    textColor=colors.white, alignment=1,
+)
+
+# Encabezados compuestos que no entran en una columna angosta ni en la palabra
+# "cintura/cadera" o "cintura/talla" (sin espacio, se cortarían a mitad de palabra).
+_ENCABEZADOS_PDF_OVERRIDE = {
+    "Índice cintura/cadera": "Índice<br/>cintura/<br/>cadera",
+    "Índice cintura/talla": "Índice<br/>cintura/<br/>talla",
+}
 
 
 def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas: dict) -> bytes:
@@ -629,6 +697,19 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
         ("Índice cintura/talla promedio", _fmt(_r(estadisticas.get("ict_prom")))),
     ], col_widths=(8 * cm, 5 * cm)))
 
+    story.append(Paragraph("Estadística de Grupo", styles["Seccion"]))
+    distribuciones = som.calcular_distribuciones_grupo(df)
+    imagenes = [
+        Image(_grafico_torta_png(datos, titulo), width=8.3 * cm, height=6.8 * cm)
+        for titulo, datos in distribuciones.items()
+    ]
+    for i in range(0, len(imagenes), 3):
+        fila_img = imagenes[i:i + 3]
+        while len(fila_img) < 3:
+            fila_img.append("")
+        story.append(Table([fila_img], colWidths=[8.8 * cm] * 3))
+    story.append(Spacer(1, 6))
+
     story.append(Paragraph("Detalle por Atleta (última medición)", styles["Seccion"]))
     story.append(Paragraph(
         "% Grasa corporal y % músculo esquelético solo tienen referencia cargada entre 25 y 65 años; "
@@ -636,7 +717,10 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
         styles["Normal"],
     ))
     story.append(Spacer(1, 6))
-    headers = [titulo for _, titulo, _ in _COLUMNAS_GRUPO]
+    headers = [
+        Paragraph(_ENCABEZADOS_PDF_OVERRIDE.get(titulo, titulo), _ESTILO_HEADER_GRUPO)
+        for _, titulo, _ in _COLUMNAS_GRUPO
+    ] + [Paragraph("Seguimiento Nutricional", _ESTILO_HEADER_GRUPO)]
     data = [headers]
     filas_color = []
     for _, fila in df.iterrows():
@@ -653,6 +737,21 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
                 fila_colores.append(None if color == som.COLOR_SIN_DATO else color)
             else:
                 fila_colores.append(None)
+
+        etiqueta_seg, color_seg = som.clasificar_seguimiento_nutricional(fila.to_dict(), sexo, edad)
+        # Sin dato no lleva relleno de fondo (fila_colores.append(None) más abajo),
+        # así que ahí el texto tiene que quedar en negro, no blanco sobre blanco.
+        texto_color = (
+            colors.black if color_seg.upper() in (som.COLOR_AMARILLO.upper(), som.COLOR_SIN_DATO.upper())
+            else colors.white
+        )
+        estilo_seg = ParagraphStyle(
+            name="SeguimientoCelda", fontName="Helvetica-Bold", fontSize=7, leading=8.5,
+            alignment=1, textColor=texto_color,
+        )
+        fila_valores.append(Paragraph(etiqueta_seg, estilo_seg))
+        fila_colores.append(None if color_seg == som.COLOR_SIN_DATO else color_seg)
+
         data.append(fila_valores)
         filas_color.append(fila_colores)
 

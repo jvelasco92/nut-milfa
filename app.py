@@ -581,6 +581,22 @@ def pagina_exportar():
                 )
                 st.dataframe(df_detalle, use_container_width=True, hide_index=True)
 
+                st.subheader("📊 Estadística de Grupo")
+                import plotly.graph_objects as go
+                distribuciones = som.calcular_distribuciones_grupo(df_detalle)
+                cols_graf = st.columns(3)
+                for i, (titulo, datos) in enumerate(distribuciones.items()):
+                    if not datos:
+                        continue
+                    fig = go.Figure(data=[go.Pie(
+                        labels=[et for et, _, _ in datos],
+                        values=[n for _, n, _ in datos],
+                        marker=dict(colors=[c for _, _, c in datos]),
+                        textinfo="percent+value", hovertemplate="%{label}: %{value} (%{percent})<extra></extra>",
+                    )])
+                    fig.update_layout(title=titulo, height=320, margin=dict(t=40, b=10, l=10, r=10), showlegend=True)
+                    cols_graf[i % 3].plotly_chart(fig, use_container_width=True)
+
                 c1, c2 = st.columns(2)
                 excel_bytes = pdfgen.generar_excel_grupal(grupo_nombre, df_detalle, stats)
                 c1.download_button(
