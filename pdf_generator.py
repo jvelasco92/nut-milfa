@@ -136,23 +136,31 @@ def _grafico_evolucion_png(df: pd.DataFrame) -> io.BytesIO:
 
 
 def _grafico_torta_png(datos: list[tuple[str, int, str]], titulo: str) -> io.BytesIO:
-    """datos: [(etiqueta, cantidad, color_hex), ...]."""
-    fig, ax = plt.subplots(figsize=(4.2, 3.6))
+    """datos: [(etiqueta, cantidad, color_hex), ...]. La torta va compacta a la
+    izquierda y las categorías (que pueden ser largas) van en una leyenda a la
+    derecha, con el mismo tamaño de figura y reparto de espacio siempre, para
+    que las 5 tortas del reporte grupal salgan iguales y ninguna etiqueta se
+    corte (a diferencia de poner el texto largo pegado a la torta)."""
+    fig, ax = plt.subplots(figsize=(6.2, 4.0))
     total = sum(n for _, n, _ in datos)
     if not datos or total == 0:
         ax.text(0.5, 0.5, "Sin datos", ha="center", va="center", fontsize=10)
         ax.axis("off")
     else:
-        etiquetas = [f"{et}\n{n} ({n / total * 100:.0f}%)" for et, n, _ in datos]
+        etiquetas_leyenda = [f"{et}: {n} ({n / total * 100:.0f}%)" for et, n, _ in datos]
         valores = [n for _, n, _ in datos]
         colores_pie = [c for _, _, c in datos]
-        ax.pie(valores, labels=etiquetas, colors=colores_pie, startangle=90, textprops={"fontsize": 7.5})
+        wedges, _ = ax.pie(valores, colors=colores_pie, startangle=90)
+        ax.legend(
+            wedges, etiquetas_leyenda, loc="center left", bbox_to_anchor=(1.0, 0.5),
+            fontsize=8, frameon=False, handlelength=1.2, labelspacing=1.0,
+        )
         ax.axis("equal")
-    ax.set_title(titulo, fontsize=10, fontweight="bold", pad=18)
-    fig.tight_layout()
+    ax.set_title(titulo, fontsize=11, fontweight="bold", pad=12)
+    fig.subplots_adjust(left=0.03, right=0.48, top=0.85, bottom=0.05)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=150)
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -633,7 +641,7 @@ def generar_excel_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadistic
     # --- Hoja de estadística de grupo (gráficos de torta) ---
     ws_stats = wb.create_sheet("Estadística")
     ws_stats.cell(row=1, column=1, value=f"Estadística de Grupo — {nombre_grupo}").font = Font(bold=True, size=13)
-    ANCHO_IMG, ALTO_IMG = 380, 300  # px
+    ANCHO_IMG, ALTO_IMG = 460, 297  # px
     fila_img, col_img = 2, 0
     for i, (titulo, datos) in enumerate(som.calcular_distribuciones_grupo(df).items()):
         img = XLImage(_grafico_torta_png(datos, titulo))
@@ -670,6 +678,117 @@ _ENCABEZADOS_PDF_OVERRIDE = {
 }
 
 
+def _tabla_reglas_pdf(titulo: str, reglas: list[tuple]) -> Table:
+    """Mini tabla (Rango | Categoría) coloreada, para la página de referencias del PDF grupal."""
+    filas = []
+    for minimo, maximo, etiqueta, color in reglas:
+        if minimo is None:
+            rango = f"< {maximo}"
+        elif maximo is None:
+            rango = f"≥ {minimo}"
+        else:
+            rango = f"{minimo} - {maximo}"
+        filas.append((rango, etiqueta, color))
+
+    estilo_titulo = ParagraphStyle(name="TituloRegla", fontName="Helvetica-Bold", fontSize=8, textColor=colors.white)
+    data = [[Paragraph(titulo, estilo_titulo), ""]] + [[rango, etiqueta] for rango, etiqueta, _ in filas]
+    t = Table(data, colWidths=[3.0 * cm, 4.6 * cm])
+    style = [
+        ("SPAN", (0, 0), (-1, 0)),
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.lightgrey),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+    ]
+    for i, (_, _, color) in enumerate(filas, start=1):
+        texto = colors.black if color.upper() == som.COLOR_AMARILLO.upper() else colors.white
+        style += [
+            ("BACKGROUND", (1, i), (1, i), colors.HexColor(color)),
+            ("TEXTCOLOR", (1, i), (1, i), texto),
+        ]
+    t.setStyle(TableStyle(style))
+    return t
+
+
+def _pagina_referencias_pdf(styles) -> list:
+    """Página final del PDF grupal: puntos de corte de cada métrica y los
+    criterios de la clasificación de Seguimiento Nutricional, por si se
+    quieren revisar los criterios usados en el reporte."""
+    elementos = [Paragraph("Código de Referencia", styles["TituloApp"])]
+    elementos.append(Paragraph(
+        "Puntos de corte usados para el semáforo de colores de este reporte "
+        "(fuente: inputs/puntos de corte.xlsx) y criterios de la clasificación de Seguimiento Nutricional.",
+        styles["Subtitulo"],
+    ))
+
+    tablas = [
+        _tabla_reglas_pdf("IMC (kg/m²)", som.reglas_referencia("imc")),
+        _tabla_reglas_pdf("% Grasa visceral (nivel OMRON)", som.reglas_referencia("grasa_visceral")),
+        _tabla_reglas_pdf("Índice cintura/talla", som.reglas_referencia("indice_cintura_talla")),
+    ]
+    for sexo in ("Femenino", "Masculino"):
+        tablas.append(_tabla_reglas_pdf(f"Circ. cintura (cm) — {sexo}", som.reglas_referencia("circ_cintura", sexo)))
+        tablas.append(_tabla_reglas_pdf(f"Índice cintura/cadera — {sexo}", som.reglas_referencia("indice_cintura_cadera", sexo)))
+        tablas.append(_tabla_reglas_pdf(f"Pliegue abdominal (mm) — {sexo}", som.reglas_referencia("pliegue_abdominal", sexo)))
+    for edad_ini, edad_fin in som.BANDAS_EDAD:
+        for sexo in ("Femenino", "Masculino"):
+            tablas.append(_tabla_reglas_pdf(
+                f"% Grasa corporal — {sexo}, {edad_ini}-{edad_fin} años",
+                som.reglas_referencia("grasa_corporal_pct", sexo, edad_ini),
+            ))
+            tablas.append(_tabla_reglas_pdf(
+                f"% Músculo esquelético — {sexo}, {edad_ini}-{edad_fin} años",
+                som.reglas_referencia("musculo_esqueletico_pct", sexo, edad_ini),
+            ))
+
+    for i in range(0, len(tablas), 3):
+        fila = tablas[i:i + 3]
+        while len(fila) < 3:
+            fila.append("")
+        elementos.append(Table([fila], colWidths=[8.9 * cm] * 3))
+        elementos.append(Spacer(1, 4))
+
+    elementos.append(PageBreak())
+    elementos.append(Paragraph("Criterios de Seguimiento Nutricional", styles["Seccion"]))
+    elementos.append(Paragraph(
+        "Clasifica a cada atleta según % grasa corporal, % músculo esquelético, adiposidad central "
+        "(circ. cintura + índice cintura/cadera + índice cintura/talla combinados) y pliegue abdominal.",
+        styles["Normal"],
+    ))
+    elementos.append(Spacer(1, 8))
+    elementos.append(Paragraph(f"<b>🟢 {som.ETIQUETA_VERDE_SEGUIMIENTO}</b> — perfil favorable.", styles["Normal"]))
+    elementos.append(Paragraph(
+        "% grasa Normal, % músculo Normal o Alto, adiposidad central sin alteraciones y pliegue "
+        "abdominal esperado.",
+        styles["Normal"],
+    ))
+    elementos.append(Spacer(1, 8))
+    elementos.append(Paragraph(
+        f"<b>🟡 {som.ETIQUETA_AMARILLO_SEGUIMIENTO}</b> — alteración aislada, sin criterios de prioridad.",
+        styles["Normal"],
+    ))
+    elementos.append(Paragraph(
+        "% grasa Alto como único hallazgo, % músculo Bajo como único hallazgo, pliegue abdominal "
+        "elevado como único hallazgo, o adiposidad central discordante sin otras alteraciones relevantes.",
+        styles["Normal"],
+    ))
+    elementos.append(Spacer(1, 8))
+    elementos.append(Paragraph(
+        f"<b>🔴 {som.ETIQUETA_ROJO_SEGUIMIENTO}</b> — acompañamiento nutricional prioritario.",
+        styles["Normal"],
+    ))
+    elementos.append(Paragraph(
+        "Adiposidad central aumentada (cintura, ICC e ICT elevados a la vez); o % grasa Muy alto "
+        "combinado con otra alteración (músculo bajo, pliegue elevado, o adiposidad central discordante "
+        "o aumentada). El músculo bajo, el pliegue elevado y la grasa alta NO generan este nivel por sí "
+        "solos, para evitar sobre-clasificar como prioritario a un atleta con una sola desviación aislada.",
+        styles["Normal"],
+    ))
+    return elementos
+
+
 def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas: dict) -> bytes:
     """Reporte PDF de estadística grupal: promedios + tabla por atleta con semáforo."""
     df = df_detalle.copy()
@@ -696,19 +815,6 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
         ("Índice cintura/cadera promedio", _fmt(_r(estadisticas.get("icc_prom")))),
         ("Índice cintura/talla promedio", _fmt(_r(estadisticas.get("ict_prom")))),
     ], col_widths=(8 * cm, 5 * cm)))
-
-    story.append(Paragraph("Estadística de Grupo", styles["Seccion"]))
-    distribuciones = som.calcular_distribuciones_grupo(df)
-    imagenes = [
-        Image(_grafico_torta_png(datos, titulo), width=8.3 * cm, height=6.8 * cm)
-        for titulo, datos in distribuciones.items()
-    ]
-    for i in range(0, len(imagenes), 3):
-        fila_img = imagenes[i:i + 3]
-        while len(fila_img) < 3:
-            fila_img.append("")
-        story.append(Table([fila_img], colWidths=[8.8 * cm] * 3))
-    story.append(Spacer(1, 6))
 
     story.append(Paragraph("Detalle por Atleta (última medición)", styles["Seccion"]))
     story.append(Paragraph(
@@ -780,6 +886,22 @@ def generar_pdf_grupal(nombre_grupo: str, df_detalle: pd.DataFrame, estadisticas
                 ]
     t.setStyle(TableStyle(style))
     story.append(t)
+
+    story.append(PageBreak())
+    story.append(Paragraph("Estadística de Grupo", styles["Seccion"]))
+    distribuciones = som.calcular_distribuciones_grupo(df)
+    imagenes = [
+        Image(_grafico_torta_png(datos, titulo), width=8.6 * cm, height=5.55 * cm)
+        for titulo, datos in distribuciones.items()
+    ]
+    for i in range(0, len(imagenes), 3):
+        fila_img = imagenes[i:i + 3]
+        while len(fila_img) < 3:
+            fila_img.append("")
+        story.append(Table([fila_img], colWidths=[8.9 * cm] * 3))
+
+    story.append(PageBreak())
+    story.extend(_pagina_referencias_pdf(styles))
 
     doc.build(story, onFirstPage=_dibujar_encabezado, onLaterPages=_dibujar_encabezado)
     buffer.seek(0)
