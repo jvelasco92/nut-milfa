@@ -753,25 +753,27 @@ def _pagina_referencias_pdf(styles) -> list:
     elementos.append(PageBreak())
     elementos.append(Paragraph("Criterios de Seguimiento Nutricional", styles["Seccion"]))
     elementos.append(Paragraph(
-        "Clasifica a cada atleta según % grasa corporal, % músculo esquelético, adiposidad central "
-        "(circ. cintura + índice cintura/cadera + índice cintura/talla combinados) y pliegue abdominal.",
+        "Cuenta cuántos de 6 indicadores están alterados (no en su categoría favorable): % grasa "
+        "corporal, circ. cintura, índice cintura/cadera, índice cintura/talla, % grasa visceral y "
+        "pliegue abdominal. El % músculo esquelético y la adiposidad central (cintura + índice "
+        "cintura/cadera + índice cintura/talla combinados) se evalúan aparte.",
         styles["Normal"],
     ))
     elementos.append(Spacer(1, 8))
     elementos.append(Paragraph(f"<b>🟢 {som.ETIQUETA_VERDE_SEGUIMIENTO}</b> — perfil favorable.", styles["Normal"]))
     elementos.append(Paragraph(
-        "% grasa Normal, % músculo Normal o Alto, adiposidad central sin alteraciones y pliegue "
-        "abdominal esperado.",
+        "0 a 2 indicadores alterados, con % músculo esquelético normal o alto (no bajo) y sin "
+        "adiposidad central aumentada.",
         styles["Normal"],
     ))
     elementos.append(Spacer(1, 8))
     elementos.append(Paragraph(
-        f"<b>🟡 {som.ETIQUETA_AMARILLO_SEGUIMIENTO}</b> — alteración aislada, sin criterios de prioridad.",
+        f"<b>🟡 {som.ETIQUETA_AMARILLO_SEGUIMIENTO}</b> — perfil a optimizar.",
         styles["Normal"],
     ))
     elementos.append(Paragraph(
-        "% grasa Alto como único hallazgo, % músculo Bajo como único hallazgo, pliegue abdominal "
-        "elevado como único hallazgo, o adiposidad central discordante sin otras alteraciones relevantes.",
+        "Todo lo que no entra en Verde ni en Rojo: por ejemplo 3 o más indicadores alterados, o "
+        "% músculo esquelético bajo sin otra alteración que amerite prioridad.",
         styles["Normal"],
     ))
     elementos.append(Spacer(1, 8))
@@ -780,10 +782,11 @@ def _pagina_referencias_pdf(styles) -> list:
         styles["Normal"],
     ))
     elementos.append(Paragraph(
-        "Adiposidad central aumentada (cintura, ICC e ICT elevados a la vez); o % grasa Muy alto "
-        "combinado con otra alteración (músculo bajo, pliegue elevado, o adiposidad central discordante "
-        "o aumentada). El músculo bajo, el pliegue elevado y la grasa alta NO generan este nivel por sí "
-        "solos, para evitar sobre-clasificar como prioritario a un atleta con una sola desviación aislada.",
+        "Adiposidad central aumentada (cintura, ICC e ICT elevados a la vez); o % grasa corporal Muy "
+        "alto combinado con otra alteración (músculo bajo, pliegue elevado, o adiposidad central "
+        "discordante o aumentada). El músculo bajo, el pliegue elevado y la grasa alta NO generan este "
+        "nivel por sí solos, para evitar sobre-clasificar como prioritario a un atleta con una sola "
+        "desviación aislada.",
         styles["Normal"],
     ))
     return elementos

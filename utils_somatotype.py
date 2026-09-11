@@ -564,48 +564,76 @@ def generar_conclusion_interpretativa(medicion: dict, sexo: str, edad: int = Non
 
 
 # ---------------------------------------------------------------------------
-# Clasificación grupal de necesidad de acompañamiento nutricional. Usa % grasa
-# corporal, % músculo esquelético, adiposidad central (cintura + ICC + ICT) y
-# pliegue abdominal. El músculo bajo, el pliegue elevado y la grasa alta NO
-# generan ROJO por sí solos (evita sobre-sensibilidad): ROJO requiere
-# adiposidad central aumentada, o grasa MUY ALTO combinada con otra alteración.
+# Clasificación grupal de necesidad de acompañamiento nutricional
+# (inputs/Matriz_completa_de_interpretacion.txt). Cuenta cuántos de 6
+# indicadores (grasa corporal, circ. cintura, ICC, ICT, grasa visceral,
+# pliegue abdominal — el músculo esquelético se evalúa aparte) están
+# "alterados" (no en su categoría favorable):
+#   VERDE: 0-2 alterados, con músculo esquelético normal o alto y sin
+#          adiposidad central aumentada (cintura+ICC+ICT elevados a la vez).
+#   ROJO: adiposidad central aumentada, o grasa MUY ALTO combinada con otra
+#         alteración (músculo bajo, pliegue elevado, o central discordante).
+#         El músculo bajo, el pliegue elevado y la grasa alta NO generan
+#         ROJO por sí solos (evita sobre-sensibilidad).
+#   AMARILLO: todo lo que no entra en VERDE ni en ROJO (ej. músculo normal
+#             con 2-3 indicadores en amarillo/naranja, o músculo bajo aislado).
 # ---------------------------------------------------------------------------
 ETIQUETA_VERDE_SEGUIMIENTO = "No necesita acompañamiento"
 ETIQUETA_AMARILLO_SEGUIMIENTO = "No requiere acompañamiento prioritario"
 ETIQUETA_ROJO_SEGUIMIENTO = "Requiere Acompañamiento"
 ETIQUETA_SIN_DATOS_SEGUIMIENTO = "Sin datos suficientes"
 
+# Nivel (VERDE/MEDIO/ROJO) de cada indicador del "pool" de 6, a partir de su
+# etiqueta de clasificar_metrica. MEDIO = "alterado pero no en el peor tramo".
+_NIVEL_GRASA = {"NORMAL": "VERDE", "BAJO": "MEDIO", "ALTO": "MEDIO", "MUY ALTO": "ROJO"}
+_NIVEL_CINTURA = {"NORMAL": "VERDE", "RIESGO AUMENTADO": "MEDIO", "RIESGO SUST. AUMENTADO": "ROJO"}
+_NIVEL_ICC = {"BAJO RIESGO": "VERDE", "RIESGO AUMENTADO": "ROJO"}
+_NIVEL_ICT = {"SIN RIESGO": "VERDE", "RIESGO AUMENTADO": "ROJO"}
+_NIVEL_VISCERAL = {"NORMAL": "VERDE", "ALTO": "MEDIO", "MUY ALTO": "ROJO"}
+_NIVEL_PLIEGUE = {"ESPERADO": "VERDE", "ELEVADO": "ROJO"}
+
 
 def clasificar_seguimiento_nutricional(medicion: dict, sexo: str, edad: int = None) -> tuple[str, str]:
     """Devuelve (etiqueta, color_hex) de necesidad de acompañamiento
     nutricional, o (ETIQUETA_SIN_DATOS_SEGUIMIENTO, gris) si falta algún
     indicador o está fuera de las franjas etarias con referencia cargada."""
-    grasa, _ = clasificar_metrica("grasa_corporal_pct", medicion.get("bio_grasa_corporal"), sexo, edad)
-    if grasa not in ("BAJO", "NORMAL", "ALTO", "MUY ALTO"):
-        return ETIQUETA_SIN_DATOS_SEGUIMIENTO, COLOR_SIN_DATO
+    grasa_etq, _ = clasificar_metrica("grasa_corporal_pct", medicion.get("bio_grasa_corporal"), sexo, edad)
+    cintura_etq, _ = clasificar_metrica("circ_cintura", medicion.get("cintura"), sexo)
+    icc_etq, _ = clasificar_metrica("indice_cintura_cadera", medicion.get("indice_cintura_cadera"), sexo)
+    ict_etq, _ = clasificar_metrica("indice_cintura_talla", medicion.get("indice_cintura_talla"), sexo)
+    visceral_etq, _ = clasificar_metrica("grasa_visceral", medicion.get("bio_grasa_visceral"), sexo)
+    pliegue_etq, _ = clasificar_metrica("pliegue_abdominal", medicion.get("pliegue_abdominal"), sexo)
 
+    niveles = {
+        "grasa": _NIVEL_GRASA.get(grasa_etq),
+        "cintura": _NIVEL_CINTURA.get(cintura_etq),
+        "icc": _NIVEL_ICC.get(icc_etq),
+        "ict": _NIVEL_ICT.get(ict_etq),
+        "visceral": _NIVEL_VISCERAL.get(visceral_etq),
+        "pliegue": _NIVEL_PLIEGUE.get(pliegue_etq),
+    }
     musculo_estado = _estado_musculo(medicion.get("pct_musculo_esqueletico"), sexo, edad)
     central_estado = _estado_central(
         medicion.get("cintura"), medicion.get("indice_cintura_cadera"), medicion.get("indice_cintura_talla"), sexo,
     )
-    pliegue_estado = _estado_pliegue(medicion.get("pliegue_abdominal"), sexo)
-    if musculo_estado is None or central_estado is None or pliegue_estado is None:
+    if any(v is None for v in niveles.values()) or musculo_estado is None or central_estado is None:
         return ETIQUETA_SIN_DATOS_SEGUIMIENTO, COLOR_SIN_DATO
 
     musculo_bajo = musculo_estado == "ROJO"
-    pliegue_elevado = pliegue_estado == "ROJO"
+    pliegue_elevado = niveles["pliegue"] == "ROJO"
 
     # --- ROJO: acompañamiento nutricional prioritario ---
     if central_estado == "ROJO":
         return ETIQUETA_ROJO_SEGUIMIENTO, COLOR_ROJO
-    if grasa == "MUY ALTO" and (musculo_bajo or pliegue_elevado or central_estado == "AMARILLO"):
+    if niveles["grasa"] == "ROJO" and (musculo_bajo or pliegue_elevado or central_estado == "AMARILLO"):
         return ETIQUETA_ROJO_SEGUIMIENTO, COLOR_ROJO
 
-    # --- VERDE: perfil favorable ---
-    if grasa == "NORMAL" and not musculo_bajo and central_estado == "VERDE" and not pliegue_elevado:
+    # --- VERDE: 0-2 indicadores alterados, músculo normal o alto ---
+    n_alterados = sum(1 for nivel in niveles.values() if nivel != "VERDE")
+    if n_alterados <= 2 and not musculo_bajo:
         return ETIQUETA_VERDE_SEGUIMIENTO, COLOR_VERDE
 
-    # --- AMARILLO: alteración aislada, sin criterios de prioridad ---
+    # --- AMARILLO: todo lo que no entra en VERDE ni en ROJO ---
     return ETIQUETA_AMARILLO_SEGUIMIENTO, COLOR_AMARILLO
 
 
