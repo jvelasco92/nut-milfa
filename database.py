@@ -133,6 +133,11 @@ class Medicion(Base):
 @st.cache_resource(show_spinner=False)
 def get_engine():
     url = st.secrets["DATABASE_URL"]
+    # Fuerza el driver psycopg2 (el que está en requirements.txt) en vez de
+    # dejar que SQLAlchemy elija el default para "postgresql://" a secas,
+    # que en versiones nuevas puede resolver a psycopg (v3, no instalado).
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
     return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=10)
 
 
